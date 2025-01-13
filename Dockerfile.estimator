@@ -1,0 +1,79 @@
+FROM ros:jazzy-perception AS base
+
+SHELL [ "/bin/bash" , "-c" ]
+
+WORKDIR /opt/ros/underlay
+
+ENV ROS_HOME=/tmp
+ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+
+# underlay stage: base + dependencies built
+FROM base AS underlay
+
+ADD ibpc_interfaces /opt/ros/underlay/src/ibpc_interfaces
+
+RUN . /opt/ros/jazzy/setup.sh \
+    && apt-get update \
+    && rosdep update \
+    && rosdep install --from-paths src --ignore-src --rosdistro jazzy -yr \
+    && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    --event-handlers=console_direct+ \
+    --merge-install
+
+FROM underlay AS overlay
+
+# TODO(Yadunund): Remove this step after next Jazzy sync.
+RUN apt update \
+    && sudo apt install curl -y \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2-testing/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+RUN apt-get update \
+    &&  apt install -y ros-jazzy-rmw-zenoh-cpp \
+    && rm -rf /var/lib/apt/lists/*
+
+ADD ibpc_pose_estimator /opt/ros/overlay/src/ibpc_pose_estimator
+
+RUN . /opt/ros/jazzy/setup.sh \
+    && . /opt/ros/underlay/install/setup.sh \
+    && cd /opt/ros/overlay \
+    && rosdep install --from-paths src --ignore-src --rosdistro jazzy -yr \
+    && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    --event-handlers=console_direct+ \
+    --merge-install
+
+# result stage: base + copied install folders from the overlay + service setup.
+FROM base
+
+ARG SERVICE_PACKAGE=ibpc_pose_estimator
+ARG SERVICE_EXECUTABLE_NAME=ibpc_pose_estimator
+ARG MODEL_PATH=/tmp
+ARG SERVICE_NAME=/get_pose_estimates
+
+RUN apt update \
+    && sudo apt install curl -y \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2-testing/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+RUN apt-get update \
+    &&  apt install -y ros-jazzy-rmw-zenoh-cpp \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=overlay /opt/ros/underlay/install /opt/ros/underlay/install
+COPY --from=overlay /opt/ros/overlay/install /opt/ros/overlay/install
+
+RUN sed --in-place \
+    --expression '$isource "/opt/ros/overlay/install/setup.bash"' \
+    /ros_entrypoint.sh 
+    # && sed --in-place \
+    #     --expression '$isource "/opt/ros/overlay/install/setup.bash"' \
+    #     /ros_entrypoint.sh
+
+ENV SERVICE_PACKAGE=${SERVICE_PACKAGE}
+ENV SERVICE_EXECUTABLE_NAME=${SERVICE_EXECUTABLE_NAME}
+ENV MODEL_PATH=${MODEL_PATH}
+ENV SERVICE_NAME=${SERVICE_NAME}
+
+CMD exec /opt/ros/overlay/install/lib/${SERVICE_PACKAGE}/${SERVICE_EXECUTABLE_NAME} \
+    --ros-args -p model_path:=${MODEL_PATH} \
+    -p service_name:=${SERVICE_NAME}
