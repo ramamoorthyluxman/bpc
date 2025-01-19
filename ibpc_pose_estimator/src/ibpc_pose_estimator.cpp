@@ -26,7 +26,7 @@ PoseEstimator::PoseEstimator(const rclcpp::NodeOptions & options)
   }
   RCLCPP_INFO(
       this->get_logger(),
-      "Loading model from path [ %s ].",
+      "Model directory set to [ %s ].",
       path_str.c_str()
   );
   model_dir_ = std::filesystem::path(std::move(path_str));
@@ -39,11 +39,18 @@ PoseEstimator::PoseEstimator(const rclcpp::NodeOptions & options)
       srv_name.c_str()
   );
   srv_ = this->create_service<GetPoseEstimates>(
-      std::move(srv_name),
+    std::move(srv_name),
     [this](std::shared_ptr<const GetPoseEstimates::Request> request,
     std::shared_ptr<GetPoseEstimates::Response> response)
     {
-      response->pose_estimates = this->get_pose_estimates(std::move(request));
+      cv_bridge::CvImageConstPtr rgb = cv_bridge::toCvShare(request->rgb, request);
+      cv_bridge::CvImageConstPtr depth = cv_bridge::toCvShare(request->depth, request);
+      cv_bridge::CvImageConstPtr polarized = cv_bridge::toCvShare(request->polarized, request);
+      response->pose_estimates = this->get_pose_estimates(
+        request->object_ids,
+        rgb->image,
+        depth->image,
+        polarized->image);
       }
   );
 }
@@ -56,7 +63,10 @@ const std::filesystem::path & PoseEstimator::model_dir() const
 
 //==================================================================================================
 auto PoseEstimator::get_pose_estimates(
-  std::shared_ptr<const GetPoseEstimates::Request> request) -> std::vector<PoseEstimate>
+  const std::vector<uint64_t> & object_ids,
+  const cv::Mat & rgb,
+  const cv::Mat & depth,
+  const cv::Mat & polarized) -> std::vector<PoseEstimate>
 {
   std::vector<PoseEstimate> pose_estimates = {};
 

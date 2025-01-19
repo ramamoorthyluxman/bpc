@@ -7,6 +7,7 @@ endif()
 
 # find packages.
 find_package(ament_cmake REQUIRED)
+find_package(cv_bridge REQUIRED)
 find_package(ibpc_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
@@ -16,6 +17,7 @@ add_library(ibpc_pose_estimator_component SHARED src/ibpc_pose_estimator.cpp)
 
 target_link_libraries(ibpc_pose_estimator_component
   PUBLIC
+    cv_bridge::cv_bridge
     rclcpp::rclcpp
     rclcpp_components::component
     ${ibpc_interfaces_TARGETS}
