@@ -1,5 +1,8 @@
 # Industrial Bin Picking Challenge (IBPC)
 
+[![build](https://github.com/Yadunund/ibpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/Yadunund/ibpc/actions/workflows/build.yaml)
+[![style](https://github.com/Yadunund/ibpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/Yadunund/ibpc/actions/workflows/style.yaml)
+
 For more details on the challenge, [click here](https://bpc.opencv.org/).
 
 ## Design
