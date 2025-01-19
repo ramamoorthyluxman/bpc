@@ -11,6 +11,7 @@
 
   <depend>cv_bridge</depend>
   <depend>ibpc_interfaces</depend>
+  <depend>image_geometry</depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_components</depend>
 
