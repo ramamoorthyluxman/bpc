@@ -7,10 +7,12 @@
 #include <memory>
 #include <vector>
 
-#include "rclcpp/rclcpp.hpp"
-
 #include "ibpc_interfaces/msg/pose_estimate.hpp"
 #include "ibpc_interfaces/srv/get_pose_estimates.hpp"
+
+#include "cv_bridge/cv_bridge.hpp"
+#include "rclcpp/rclcpp.hpp"
+
 
 namespace ibpc
 {
@@ -25,13 +27,16 @@ public:
   /// Constructor.
   explicit PoseEstimator(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
-  // Get the path to the directory in the local filesystem that contains various models
-  // and other files required for inference.
+  /// Get the path to the directory in the local filesystem that contains various models
+  /// and other files required for inference.
   const std::filesystem::path & model_dir() const;
 
-  // TODO(Yadunund): Replace request with concrete args that participants will be familiar wiht.
+  /// Function for participants to implement to return pose estimates for objects in a scene.
   std::vector<PoseEstimate> get_pose_estimates(
-    std::shared_ptr<const GetPoseEstimates::Request> request);
+    const std::vector<uint64_t> & object_ids,
+    const cv::Mat & rgb,
+    const cv::Mat & depth,
+    const cv::Mat & polarized);
 
 private:
   std::filesystem::path model_dir_;
