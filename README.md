@@ -21,6 +21,7 @@ TODO
 ```bash
 mkdir ~/ws_ibpc/src -p
 cd ~/ws_ibpc/src
+git clone https://github.com/Yadunund/bop_toolkit.git -b yadu/ament_python
 git clone https://github.com/Yadunund/ibpc.git
 ```
 
@@ -41,7 +42,7 @@ cd ~/ws_ibpc/src/ibpc
 docker buildx build -t ibpc:pose_estimator \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
-    . 
+    .
 ```
 
 ## Start the Zenoh router
