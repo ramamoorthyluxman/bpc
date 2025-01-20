@@ -1,31 +1,82 @@
 # todo(Yadunund): Add copyright.
 
+import sys
+from pathlib import Path
+
 import rclpy
 from rclpy.node import Node
 
-# from bop_toolkit_lib import *
+from bop_toolkit_lib.config import datasets_path
+from bop_toolkit_lib.dataset_params import (
+    get_camera_params,
+    get_model_params,
+    get_present_scene_ids,
+    get_split_params,
+)
+from bop_toolkit_lib.inout import load_json, load_scene_gt, load_scene_camera
 
 from ibpc_interfaces.msg import PoseEstimate
 from ibpc_interfaces.srv import GetPoseEstimates
-
-import sys
-
-class TesterNode(Node):
-    def __init__(self):
-        super().__init__('ibpc_tester_node')
-        self.get_logger().info('Tester node started...')
 
 
 def main(argv=sys.argv):
     rclpy.init(args=argv)
     args_without_ros = rclpy.utilities.remove_ros_args(argv)
-    n = TesterNode()
-    try:
-        rclpy.spin(n)
-        rclpy.get_logger.info('Shutting down...')
-    except KeyboardInterrupt:
-        pass
+    node = rclpy.create_node("ibpc_tester_node")
+
+    node.get_logger().info("Tester node started...")
+    node.get_logger().info(f"Datasets path is set to {datasets_path}.")
+
+    # Declare parameters.
+    node.declare_parameter("dataset_name", "lm")
+    dataset_name = node.get_parameter("dataset_name").get_parameter_value().string_value
+    node.get_logger().info("Loading from dataset {dataset_name}.")
+
+    # Configure members.
+    camera_params = get_camera_params(datasets_path, dataset_name)
+    node.get_logger().info(f"Loaded camera params: {camera_params}")
+    model_params = get_model_params(datasets_path, dataset_name)
+    node.get_logger().info(f"Loaded model params: {model_params}")
+    # Load the test split.
+    test_split = get_split_params(datasets_path, dataset_name, "test")
+    node.get_logger().info(f"Parsed test split: {test_split}")
+
+    # Create the ROS client to query pose estimates.
+    client = node.create_client(GetPoseEstimates, "/get_pose_estimates")
+    while not client.wait_for_service(timeout_sec=1.0):
+        node.get_logger().info(
+            "/get_pose_estimates service not available, waiting again..."
+        )
+    results = {}
+    # Get pose estimates for every image in every scene.
+    for scene_id in test_split["scene_ids"]:
+        scene_dir = Path(test_split["split_path"]) / "{scene_id:06d}".format(
+            scene_id=scene_id
+        )
+        scene_gt = load_scene_gt(test_split["scene_gt_tpath"].format(scene_id=scene_id))
+        for img_id, obj_gts in scene_gt.items():
+            request = GetPoseEstimates.Request()
+            request.rgb.encoding = "rgb8"
+            request.depth.encoding = "mono8"
+            request.polarized.encoding = "mono8"
+            # todo(Yadunund): Load corresponding rgb, depth and polarized image for this img_id.
+            for obj_gt in obj_gts:
+                request.object_ids.append(obj_gt["obj_id"])
+            node.get_logger().info(
+                f"Sending request for scene_id {scene_id} img_id {img_id} for objects {request.object_ids}"
+            )
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(node, future)
+            if future.result() is not None:
+                node.get_logger().info(f"Got results: {future.result().pose_estimates}")
+            else:
+                node.get_logger().error(
+                    "Exception while calling service: %r" % future.exception()
+                )
+
+    node.destroy_node()
+    rclpy.try_shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

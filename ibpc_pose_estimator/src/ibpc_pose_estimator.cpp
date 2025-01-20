@@ -45,21 +45,28 @@ PoseEstimator::PoseEstimator(const rclcpp::NodeOptions & options)
     [this](std::shared_ptr<const GetPoseEstimates::Request> request,
     std::shared_ptr<GetPoseEstimates::Response> response)
     {
-      cv_bridge::CvImageConstPtr rgb = cv_bridge::toCvShare(request->rgb, request);
-      this->rgb_camera_model_.fromCameraInfo(request->rgb_info);
-      cv_bridge::CvImageConstPtr depth = cv_bridge::toCvShare(request->depth, request);
-      this->depth_camera_model_.fromCameraInfo(request->depth_info);
-      cv_bridge::CvImageConstPtr polarized = cv_bridge::toCvShare(request->polarized, request);
-      this->polarized_camera_model_.fromCameraInfo(request->polarized_info);
-      response->pose_estimates = this->get_pose_estimates(
-        request->object_ids,
-        rgb->image,
-        this->rgb_camera_model_,
-        depth->image,
-        this->depth_camera_model_,
-        polarized->image,
-        this->polarized_camera_model_);
+      try {
+        cv_bridge::CvImageConstPtr rgb = cv_bridge::toCvShare(request->rgb, request);
+        this->rgb_camera_model_.fromCameraInfo(request->rgb_info);
+        cv_bridge::CvImageConstPtr depth = cv_bridge::toCvShare(request->depth, request);
+        this->depth_camera_model_.fromCameraInfo(request->depth_info);
+        cv_bridge::CvImageConstPtr polarized = cv_bridge::toCvShare(request->polarized, request);
+        this->polarized_camera_model_.fromCameraInfo(request->polarized_info);
+        response->pose_estimates = this->get_pose_estimates(
+          request->object_ids,
+          rgb->image,
+          this->rgb_camera_model_,
+          depth->image,
+          this->depth_camera_model_,
+          polarized->image,
+          this->polarized_camera_model_);
+      } catch(const std::exception & e) {
+        RCLCPP_ERROR(
+          this->get_logger(),
+          "Caught exception %s", e.what()
+        );
       }
+    }
   );
 }
 
