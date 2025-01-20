@@ -61,7 +61,7 @@ def main(argv=sys.argv):
             request.polarized.encoding = "mono8"
             # todo(Yadunund): Load corresponding rgb, depth and polarized image for this img_id.
             for obj_gt in obj_gts:
-                request.object_ids.append(obj_gt["obj_id"])
+                request.object_ids.append(int(obj_gt["obj_id"]))
             node.get_logger().info(
                 f"Sending request for scene_id {scene_id} img_id {img_id} for objects {request.object_ids}"
             )

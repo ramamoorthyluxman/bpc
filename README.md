@@ -45,14 +45,16 @@ docker buildx build -t ibpc:pose_estimator \
     .
 ```
 
-## Start the Zenoh router
+## Run
+
+### Start the Zenoh router
 ```bash
 docker run --init --rm --net host eclipse/zenoh:1.1.1 --no-multicast-scouting
 ```
 
-## Run the pose estimator
+### Run the pose estimator
 
-### On Ubuntu 24.04
+#### On Ubuntu 24.04
 ```bash
 cd ~/ws_ibpc/
 source install/setup.bash
@@ -60,12 +62,24 @@ export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ros2 run ibpc_pose_estimator ibpc_pose_estimator --ros-args -p model_dir:=<PATH>
 ```
 
-### With Docker
+#### With Docker
 ```bash
 docker run --network=host ibpc:pose_estimator
 ```
 
-## Query the pose estimator
+### Run the tester
+```bash
+cd ~/ws_ibpc/
+source install/setup.bash
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export BOP_PATH=<PATH_TO_BOP_DATASETS>
+ros2 run ibpc_tester ibpc_tester --ros-args -p datset_name:=<DATASET_NAME>
+```
+
+> Note: The BOP_PATH envar should point to a folder that contains models in the BOP format.
+See https://bop.felk.cvut.cz/datasets/ for more details.
+
+#### Query the pose estimator directly
 ```bash
 cd ~/ws_ibpc/
 source install/setup.bash
