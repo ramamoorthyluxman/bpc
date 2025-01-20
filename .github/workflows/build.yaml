@@ -18,9 +18,16 @@ jobs:
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       -
-        name: Build
+        name: Build estimator
         uses: docker/build-push-action@v6
         with:
           file: Dockerfile.estimator
+          load: true
+          tags: ${{ env.TEST_TAG }}
+      -
+        name: Build tester
+        uses: docker/build-push-action@v6
+        with:
+          file: Dockerfile.tester
           load: true
           tags: ${{ env.TEST_TAG }}

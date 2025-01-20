@@ -37,6 +37,8 @@ colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 ### With Docker
+Build the `ibpc_pose_estimator`.
+
 ```bash
 cd ~/ws_ibpc/src/ibpc
 docker buildx build -t ibpc:pose_estimator \
@@ -44,6 +46,19 @@ docker buildx build -t ibpc:pose_estimator \
     --build-arg="MODEL_DIR=models" \
     .
 ```
+
+Build the `ibpc_tester`.
+
+```bash
+cd ~/ws_ibpc/src/ibpc
+docker buildx build -t ibpc:tester \
+    --file ./Dockerfile.tester \
+    --build-arg="BOP_PATH=datasets" \
+    --build-arg="DATASET_NAME=lm" \
+    .
+```
+> Note: The BOP_PATH envar should point to a folder that contains models in the BOP format.
+See https://bop.felk.cvut.cz/datasets/ for more details.
 
 ## Run
 
@@ -68,6 +83,11 @@ docker run --network=host ibpc:pose_estimator
 ```
 
 ### Run the tester
+
+> Note: The BOP_PATH envar should point to a folder that contains models in the BOP format.
+See https://bop.felk.cvut.cz/datasets/ for more details.
+
+#### On Ubuntu 24.04
 ```bash
 cd ~/ws_ibpc/
 source install/setup.bash
@@ -76,8 +96,10 @@ export BOP_PATH=<PATH_TO_BOP_DATASETS>
 ros2 run ibpc_tester ibpc_tester --ros-args -p datset_name:=<DATASET_NAME>
 ```
 
-> Note: The BOP_PATH envar should point to a folder that contains models in the BOP format.
-See https://bop.felk.cvut.cz/datasets/ for more details.
+#### With Docker
+```bash
+docker run --network=host ibpc:tester
+```
 
 #### Query the pose estimator directly
 ```bash
