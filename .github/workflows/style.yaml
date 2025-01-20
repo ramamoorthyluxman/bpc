@@ -22,3 +22,5 @@ jobs:
       run: /ros_entrypoint.sh ament_uncrustify ./
     - name: cpplint
       run: /ros_entrypoint.sh ament_cpplint ./
+    - name: black
+      run: sudo apt update && sudo apt install ros-${{ matrix.distro }}-ament-black -y && /ros_entrypoint.sh ament_black ./
