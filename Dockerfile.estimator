@@ -1,4 +1,4 @@
-FROM vaheta/pose-estimator-base:latest AS base
+FROM ghcr.io/yadunund/ibpc/estimator-base:latest AS base
 
 SHELL [ "/bin/bash" , "-c" ]
 
