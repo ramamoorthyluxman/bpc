@@ -30,7 +30,7 @@ jobs:
         with:
           file: Dockerfile.estimator.base
           push: true
-          tags: ghcr.io/${{ github.repository }}/estimator-base:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository }}/estimator-base:latest
       -
         name: Build estimator
         uses: docker/build-push-action@v6
