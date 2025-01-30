@@ -17,7 +17,13 @@ from bop_toolkit_lib.dataset_params import (
     get_present_scene_ids,
     get_split_params,
 )
-from bop_toolkit_lib.inout import load_json, load_scene_gt, load_scene_camera, load_im, load_depth
+from bop_toolkit_lib.inout import (
+    load_json,
+    load_scene_gt,
+    load_scene_camera,
+    load_im,
+    load_depth,
+)
 
 from geometry_msgs.msg import Pose as PoseMsg
 from ibpc_interfaces.msg import Camera as CameraMsg
@@ -27,6 +33,7 @@ from ibpc_interfaces.srv import GetPoseEstimates
 from sensor_msgs.msg import Image
 
 from scipy.spatial.transform import Rotation
+
 
 # Helper functions
 def pose_mat_to_ros(rot: np.ndarray, trans: np.ndarray):
@@ -50,16 +57,19 @@ class BOPCamera:
 
     def _load_images(self, path, camera_name, img_id):
         self.camera_name = camera_name
-        self.depth = load_depth(f'{path}/depth_{self.camera_name}/{img_id:06d}.png')
-        if self.camera_name != 'photoneo':
-            self.rgb = load_im(f'{path}/rgb_{self.camera_name}/{img_id:06d}.png')[:,:,0]
-            self.aolp = load_im(f'{path}/aolp_{self.camera_name}/{img_id:06d}.png')
-            self.dolp = load_im(f'{path}/dolp_{self.camera_name}/{img_id:06d}.png')
+        self.depth = load_depth(f"{path}/depth_{self.camera_name}/{img_id:06d}.png")
+        if self.camera_name != "photoneo":
+            self.rgb = load_im(f"{path}/rgb_{self.camera_name}/{img_id:06d}.png")[
+                :, :, 0
+            ]
+            self.aolp = load_im(f"{path}/aolp_{self.camera_name}/{img_id:06d}.png")
+            self.dolp = load_im(f"{path}/dolp_{self.camera_name}/{img_id:06d}.png")
         else:
-            self.rgb = load_im(f'{path}/rgb_{self.camera_name}/{img_id:06d}.png')
+            self.rgb = load_im(f"{path}/rgb_{self.camera_name}/{img_id:06d}.png")
             self.aolp = None
             self.dolp = None
         self.br = CvBridge()
+
     def to_camera_msg(self, node, debug_pub) -> CameraMsg:
         msg = CameraMsg()
         msg.info.header.frame_id = self.camera_name
@@ -72,6 +82,7 @@ class BOPCamera:
         msg.aolp = self.br.cv2_to_imgmsg(self.aolp, "8UC1")
         msg.dolp = self.br.cv2_to_imgmsg(self.dolp, "8UC1")
         return msg
+
     def to_photoneo_msg(self, node, debug_pub) -> PhotoneoMsg:
         msg = PhotoneoMsg()
         msg.info.header.frame_id = self.camera_name
@@ -82,10 +93,12 @@ class BOPCamera:
         msg.depth = self.br.cv2_to_imgmsg(self.depth, "32FC1")
 
     def _load_camera_params(self, path, camera_name, img_id):
-        self.camera_params = load_scene_camera(f'{path}/scene_camera_{camera_name}.json')[img_id]
-        self.K = self.camera_params['cam_K']
-        self.R = self.camera_params['cam_R_w2c']
-        self.t = self.camera_params['cam_t_w2c']
+        self.camera_params = load_scene_camera(
+            f"{path}/scene_camera_{camera_name}.json"
+        )[img_id]
+        self.K = self.camera_params["cam_K"]
+        self.R = self.camera_params["cam_R_w2c"]
+        self.t = self.camera_params["cam_t_w2c"]
 
 
 def main(argv=sys.argv):
@@ -105,7 +118,7 @@ def main(argv=sys.argv):
     qos_profile = QoSProfile(
         depth=10,  # Queue size (adjust as needed)
         durability=DurabilityPolicy.TRANSIENT_LOCAL,
-        reliability=ReliabilityPolicy.RELIABLE  # or RELIABLE, depending on your needs
+        reliability=ReliabilityPolicy.RELIABLE,  # or RELIABLE, depending on your needs
     )
     debug_pub = node.create_publisher(Image, "/ibpc_tester_debug_images", qos_profile)
 
@@ -125,12 +138,20 @@ def main(argv=sys.argv):
         scene_dir = Path(test_split["split_path"]) / "{scene_id:06d}".format(
             scene_id=scene_id
         )
-        scene_gt = load_scene_gt(test_split["scene_gt_rgb_photoneo_tpath"].format(scene_id=scene_id))
+        scene_gt = load_scene_gt(
+            test_split["scene_gt_rgb_photoneo_tpath"].format(scene_id=scene_id)
+        )
         for img_id, obj_gts in scene_gt.items():
             request = GetPoseEstimates.Request()
-            request.cameras.append(BOPCamera(scene_dir, 'cam1', img_id).to_camera_msg(node, debug_pub))
-            request.cameras.append(BOPCamera(scene_dir, 'cam2', img_id).to_camera_msg(node, debug_pub))
-            request.cameras.append(BOPCamera(scene_dir, 'cam3', img_id).to_camera_msg(node, debug_pub))
+            request.cameras.append(
+                BOPCamera(scene_dir, "cam1", img_id).to_camera_msg(node, debug_pub)
+            )
+            request.cameras.append(
+                BOPCamera(scene_dir, "cam2", img_id).to_camera_msg(node, debug_pub)
+            )
+            request.cameras.append(
+                BOPCamera(scene_dir, "cam3", img_id).to_camera_msg(node, debug_pub)
+            )
             # request.photoneo = BOPCamera(scene_dir, 'photoneo', img_id).to_photoneo_msg(node)
             # todo(Yadunund): Load corresponding rgb, depth and polarized image for this img_id.
             for obj_gt in obj_gts:
