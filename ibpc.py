@@ -40,6 +40,7 @@ def main():
         "extension_blacklist": {},
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
         "env": [[f"BOP_PATH:/opt/ros/underlay/install/datasets"]],
+        "console_output_file": "ibpc_test_output.log",
         "volume": [
             [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets/lm"]
         ],
@@ -56,6 +57,7 @@ def main():
     zenoh_args = {
         "network": "host",
         "extension_blacklist": {},
+        "console_output_file": "ibpc_zenoh_output.log",
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
     }
 
