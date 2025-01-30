@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = "ibpc_tester"
+package_name = "ibpc_pose_estimator_py"
 
 setup(
     name=package_name,
@@ -19,7 +19,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "ibpc_tester = ibpc_tester.ibpc_tester:main",
+            "ibpc_pose_estimator = ibpc_pose_estimator_py.ibpc_pose_estimator:main",
         ],
     },
 )
