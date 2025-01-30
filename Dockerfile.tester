@@ -41,7 +41,7 @@ ADD ibpc_tester /opt/ros/overlay/src/ibpc_tester
 RUN . /opt/ros/jazzy/setup.sh \
     && . /opt/ros/underlay/install/setup.sh \
     && cd /opt/ros/overlay \
-    && cd src/ && git clone https://github.com/Yadunund/bop_toolkit.git -b yadu/ament_python src/ && cd ../ \
+    && cd src/ && git clone https://github.com/Yadunund/bop_toolkit.git -b add_ipd_dataset src/ && cd ../ \
     # && rosdep install --from-paths src --ignore-src --rosdistro jazzy -yir \
     && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release \
     --event-handlers=console_direct+ \

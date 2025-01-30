@@ -32,11 +32,6 @@ def main(argv=sys.argv):
     dataset_name = node.get_parameter("dataset_name").get_parameter_value().string_value
     node.get_logger().info("Loading from dataset {dataset_name}.")
 
-    # Configure members.
-    camera_params = get_camera_params(datasets_path, dataset_name)
-    node.get_logger().info(f"Loaded camera params: {camera_params}")
-    model_params = get_model_params(datasets_path, dataset_name)
-    node.get_logger().info(f"Loaded model params: {model_params}")
     # Load the test split.
     test_split = get_split_params(datasets_path, dataset_name, "test")
     node.get_logger().info(f"Parsed test split: {test_split}")
@@ -56,9 +51,7 @@ def main(argv=sys.argv):
         scene_gt = load_scene_gt(test_split["scene_gt_tpath"].format(scene_id=scene_id))
         for img_id, obj_gts in scene_gt.items():
             request = GetPoseEstimates.Request()
-            request.rgb.encoding = "rgb8"
-            request.depth.encoding = "mono8"
-            request.polarized.encoding = "mono8"
+            # todo(Yadunund): Fill in cameras and cv.
             # todo(Yadunund): Load corresponding rgb, depth and polarized image for this img_id.
             for obj_gt in obj_gts:
                 request.object_ids.append(int(obj_gt["obj_id"]))

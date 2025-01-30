@@ -5,7 +5,7 @@ uint64 obj_id
 float64 score
 
 # A 3x3 rotation matrix whose elements are saved row-wise.
-# loat64[9]  R # 3x3 row-major matrix
+# float64[9]  R # 3x3 row-major matrix
 
 # A 3x1 translation vector (in mm).
 # float64 t[3]
