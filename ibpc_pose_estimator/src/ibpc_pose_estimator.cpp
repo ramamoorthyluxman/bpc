@@ -12,7 +12,6 @@
 
 namespace ibpc
 {
-
 //==================================================================================================
 PoseEstimator::PoseEstimator(const rclcpp::NodeOptions & options)
 : Node("ibpc_pose_estimator", options)
@@ -46,20 +45,20 @@ PoseEstimator::PoseEstimator(const rclcpp::NodeOptions & options)
     std::shared_ptr<GetPoseEstimates::Response> response)
     {
       try {
-        cv_bridge::CvImageConstPtr rgb = cv_bridge::toCvShare(request->rgb, request);
-        this->rgb_camera_model_.fromCameraInfo(request->rgb_info);
-        cv_bridge::CvImageConstPtr depth = cv_bridge::toCvShare(request->depth, request);
-        this->depth_camera_model_.fromCameraInfo(request->depth_info);
-        cv_bridge::CvImageConstPtr polarized = cv_bridge::toCvShare(request->polarized, request);
-        this->polarized_camera_model_.fromCameraInfo(request->polarized_info);
-        response->pose_estimates = this->get_pose_estimates(
-          request->object_ids,
-          rgb->image,
-          this->rgb_camera_model_,
-          depth->image,
-          this->depth_camera_model_,
-          polarized->image,
-          this->polarized_camera_model_);
+        // cv_bridge::CvImageConstPtr rgb = cv_bridge::toCvShare(request->rgb, request);
+        // this->rgb_camera_model_.fromCameraInfo(request->rgb_info);
+        // cv_bridge::CvImageConstPtr depth = cv_bridge::toCvShare(request->depth, request);
+        // this->depth_camera_model_.fromCameraInfo(request->depth_info);
+        // cv_bridge::CvImageConstPtr polarized = cv_bridge::toCvShare(request->polarized, request);
+        // this->polarized_camera_model_.fromCameraInfo(request->polarized_info);
+        if (request->cameras.size() > 2) {
+          response->pose_estimates = this->get_pose_estimates(
+            request->object_ids,
+            request->cameras[1],
+            request->cameras[2],
+            request->cameras[3],
+            request->photoneo);
+        }
       } catch(const std::exception & e) {
         RCLCPP_ERROR(
           this->get_logger(),
@@ -79,12 +78,10 @@ const std::filesystem::path & PoseEstimator::model_dir() const
 //==================================================================================================
 auto PoseEstimator::get_pose_estimates(
   const std::vector<uint64_t> & object_ids,
-  const cv::Mat & rgb,
-  const image_geometry::PinholeCameraModel & rgb_camera_model,
-  const cv::Mat & depth,
-  const image_geometry::PinholeCameraModel & depth_camera_model,
-  const cv::Mat & polarized,
-  const image_geometry::PinholeCameraModel & polarized_camera_model) -> std::vector<PoseEstimate>
+  const Camera & cam_1,
+  const Camera & cam_2,
+  const Camera & cam_3,
+  const Photoneo & cam_4)-> std::vector<PoseEstimate>
 {
   std::vector<PoseEstimate> pose_estimates = {};
 
