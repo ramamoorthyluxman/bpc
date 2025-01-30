@@ -77,11 +77,11 @@ const std::filesystem::path & PoseEstimator::model_dir() const
 
 //==================================================================================================
 auto PoseEstimator::get_pose_estimates(
-    const std::vector<uint64_t> & object_ids,
-    const Camera & cam_1,
-    const Camera & cam_2,
-    const Camera & cam_3,
-    const Photoneo & cam_4)-> std::vector<PoseEstimate>
+  const std::vector<uint64_t> & object_ids,
+  const Camera & cam_1,
+  const Camera & cam_2,
+  const Camera & cam_3,
+  const Photoneo & cam_4)-> std::vector<PoseEstimate>
 {
   std::vector<PoseEstimate> pose_estimates = {};
 
