@@ -5,8 +5,11 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <vector>
 
+#include "ibpc_interfaces/msg/camera.hpp"
+#include "ibpc_interfaces/msg/photoneo.hpp"
 #include "ibpc_interfaces/msg/pose_estimate.hpp"
 #include "ibpc_interfaces/srv/get_pose_estimates.hpp"
 
@@ -17,12 +20,13 @@
 
 namespace ibpc
 {
-
 //==================================================================================================
 class PoseEstimator : public rclcpp::Node
 {
 public:
+  using Camera = ibpc_interfaces::msg::Camera;
   using GetPoseEstimates = ibpc_interfaces::srv::GetPoseEstimates;
+  using Photoneo = ibpc_interfaces::msg::Photoneo;
   using PoseEstimate = ibpc_interfaces::msg::PoseEstimate;
 
   /// @brief Construct a PoseEstimator
@@ -47,12 +51,11 @@ public:
   /// @note For details on image_geometry::PinholeCameraModel see
   std::vector<PoseEstimate> get_pose_estimates(
     const std::vector<uint64_t> & object_ids,
-    const cv::Mat & rgb,
-    const image_geometry::PinholeCameraModel & rgb_camera_model,
-    const cv::Mat & depth,
-    const image_geometry::PinholeCameraModel & depth_camera_model,
-    const cv::Mat & polarized,
-    const image_geometry::PinholeCameraModel & polarized_camera_model);
+    const Camera & cam_1,
+    const Camera & cam_2,
+    const Camera & cam_3,
+    const Photoneo & cam_4
+  );
 
 private:
   std::filesystem::path model_dir_;
