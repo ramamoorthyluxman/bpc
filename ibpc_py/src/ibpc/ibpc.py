@@ -8,26 +8,67 @@ from rocker.core import get_rocker_version
 from rocker.core import RockerExtensionManager
 from rocker.core import OPERATIONS_NON_INTERACTIVE
 
+from io import BytesIO
+from urllib.request import urlopen
+from zipfile import ZipFile
+
+
+def get_bop_template(modelname):
+    return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/{modelname}"
+
+
+available_datasets = {"lm": get_bop_template("lm")}
+
+bop_suffixes = [
+    "_base.zip",
+    "_models.zip",
+    "_test_all.zip",
+    "_train_pbr.zip",
+]
+
+
+def fetch_bop_dataset(dataset, output_path):
+    for suffix in bop_suffixes:
+
+        url = get_bop_template(dataset) + suffix
+        with urlopen(url) as zipurlfile:
+            with ZipFile(BytesIO(zipurlfile.read())) as zfile:
+                zfile.extractall(output_path)
+
 
 def main():
 
-    parser = argparse.ArgumentParser(
+    main_parser = argparse.ArgumentParser(
         description="The entry point for the Bin Picking Challenge",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("test_image")
-    parser.add_argument("dataset_directory")
-    parser.add_argument(
+    main_parser.add_argument(
         "-v", "--version", action="version", version="%(prog)s " + get_rocker_version()
     )
-    parser.add_argument("--debug-inside", action="store_true")
+
+    sub_parsers = main_parser.add_subparsers(title="test", dest="subparser_name")
+    test_parser = sub_parsers.add_parser("test")
+
+    test_parser.add_argument("estimator_image")
+    test_parser.add_argument("dataset")
+    test_parser.add_argument("--dataset_directory", action="store", default=".")
+    test_parser.add_argument("--debug-inside", action="store_true")
+
+    fetch_parser = sub_parsers.add_parser("fetch")
+    fetch_parser.add_argument("dataset", choices=["lm"])
+    fetch_parser.add_argument("--dataset-path", default=".")
 
     extension_manager = RockerExtensionManager()
     default_args = {"cuda": True, "network": "host"}
-    extension_manager.extend_cli_parser(parser, default_args)
+    # extension_manager.extend_cli_parser(test_parser, default_args)
 
-    args = parser.parse_args()
+    args = main_parser.parse_args()
     args_dict = vars(args)
+    if args.subparser_name == "fetch":
+        print(f"Fetching dataset {args_dict['dataset']} to {args_dict['dataset_path']}")
+        fetch_bop_dataset(args_dict["dataset"], args_dict["dataset_path"])
+        print("Fetch complete")
+        return
 
     # Confirm dataset directory is absolute
     args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
@@ -39,10 +80,13 @@ def main():
         "network": "host",
         "extension_blacklist": {},
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
-        "env": [[f"BOP_PATH:/opt/ros/underlay/install/datasets"]],
+        "env": [
+            [f"BOP_PATH:/opt/ros/underlay/install/datasets/{args_dict['dataset']}"],
+            [f"DATASET_NAME:{args_dict['dataset']}"],
+        ],
         "console_output_file": "ibpc_test_output.log",
         "volume": [
-            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets/lm"]
+            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets"]
         ],
     }
     print("Buiding tester env")
@@ -59,11 +103,13 @@ def main():
         "extension_blacklist": {},
         "console_output_file": "ibpc_zenoh_output.log",
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
+        "volume": [],
     }
+    zenoh_extensions = extension_manager.get_active_extensions(tester_args)
 
     print("Buiding zenoh env")
     dig_zenoh = DockerImageGenerator(
-        tester_extensions, tester_args, "eclipse/zenoh:1.1.1"
+        zenoh_extensions, zenoh_args, "eclipse/zenoh:1.1.1"
     )
     exit_code = dig_zenoh.build(**zenoh_args)
     if exit_code != 0:
@@ -76,22 +122,14 @@ def main():
     tester_thread = threading.Thread(target=run_instance, args=(dig_zenoh, zenoh_args))
     tester_thread.start()
 
-    # TODO Redirect stdout
-    import time
-
-    time.sleep(3)
-
     tester_thread = threading.Thread(
         target=run_instance, args=(dig_tester, tester_args)
     )
     tester_thread.start()
-    # TODO Redirect stdout
 
-    import time
-
-    time.sleep(3)
-
-    dig = DockerImageGenerator(active_extensions, args_dict, args_dict["test_image"])
+    dig = DockerImageGenerator(
+        active_extensions, args_dict, args_dict["estimator_image"]
+    )
 
     exit_code = dig.build(**vars(args))
     if exit_code != 0:
@@ -104,7 +142,3 @@ def main():
     result = dig.run(**args_dict)
     # TODO clean up threads here
     return result
-
-
-if __name__ == "__main__":
-    main()
