@@ -24,3 +24,10 @@ Temporary before rocker release of https://github.com/osrf/rocker/pull/317/
 ### Nvidia Docker (optoinal)
 Make sure nvidia_docker is installed if you want cuda. 
 
+## Release instructions
+
+```
+rm -rf dist/*
+python3 -m build --sdist .
+twine upload dist/*
+```
