@@ -8,10 +8,10 @@ with open("README.md", "r") as fh:
 
 
 setuptools.setup(
-    name='ibpc',
+    name="ibpc",
     version="0.0.1",
-    packages=['ibpc'],
-    package_dir={'': 'src'},
+    packages=["ibpc"],
+    package_dir={"": "src"},
     # package_data={'ibpc': ['templates/*.em']},
     author="Tully Foote",
     author_email="tullyfoote@intrinsic.ai",
@@ -19,16 +19,16 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://bpc.opencv.org/",
-    license='Apache 2.0',
+    license="Apache 2.0",
     install_requires=[
-        'empy',
-        'rocker>=0.2.13',
+        "empy",
+        "rocker>=0.2.13",
     ],
     install_package_data=True,
     zip_safe=False,
     entry_points={
-        'console_scripts': [
-            'ibpc = ibpc.ibpc:main',
-	    ],
-    }
+        "console_scripts": [
+            "ibpc = ibpc.ibpc:main",
+        ],
+    },
 )
