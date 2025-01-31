@@ -50,7 +50,8 @@ def main():
     test_parser = sub_parsers.add_parser("test")
 
     test_parser.add_argument("estimator_image")
-    test_parser.add_argument("dataset_directory")
+    test_parser.add_argument("dataset")
+    test_parser.add_argument("--dataset_directory", action="store", default=".")
     test_parser.add_argument("--debug-inside", action="store_true")
 
     fetch_parser = sub_parsers.add_parser("fetch")
@@ -59,13 +60,14 @@ def main():
 
     extension_manager = RockerExtensionManager()
     default_args = {"cuda": True, "network": "host"}
-    extension_manager.extend_cli_parser(test_parser, default_args)
+    # extension_manager.extend_cli_parser(test_parser, default_args)
 
     args = main_parser.parse_args()
     args_dict = vars(args)
     if args.subparser_name == "fetch":
-        print("called fetch_dataset")
+        print(f"Fetching dataset {args_dict['dataset']} to {args_dict['dataset_path']}")
         fetch_bop_dataset(args_dict["dataset"], args_dict["dataset_path"])
+        print("Fetch complete")
         return
 
     # Confirm dataset directory is absolute
@@ -78,10 +80,13 @@ def main():
         "network": "host",
         "extension_blacklist": {},
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
-        "env": [[f"BOP_PATH:/opt/ros/underlay/install/datasets"]],
+        "env": [
+            [f"BOP_PATH:/opt/ros/underlay/install/datasets/{args_dict['dataset']}"],
+            [f"DATASET_NAME:{args_dict['dataset']}"],
+        ],
         "console_output_file": "ibpc_test_output.log",
         "volume": [
-            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets/lm"]
+            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets"]
         ],
     }
     print("Buiding tester env")
@@ -98,11 +103,13 @@ def main():
         "extension_blacklist": {},
         "console_output_file": "ibpc_zenoh_output.log",
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
+        "volume": [],
     }
+    zenoh_extensions = extension_manager.get_active_extensions(tester_args)
 
     print("Buiding zenoh env")
     dig_zenoh = DockerImageGenerator(
-        tester_extensions, tester_args, "eclipse/zenoh:1.1.1"
+        zenoh_extensions, zenoh_args, "eclipse/zenoh:1.1.1"
     )
     exit_code = dig_zenoh.build(**zenoh_args)
     if exit_code != 0:
