@@ -11,22 +11,26 @@ from rocker.core import OPERATIONS_NON_INTERACTIVE
 
 def main():
 
-    parser = argparse.ArgumentParser(
+    main_parser = argparse.ArgumentParser(
         description="The entry point for the Bin Picking Challenge",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("test_image")
-    parser.add_argument("dataset_directory")
-    parser.add_argument(
+    main_parser.add_argument(
         "-v", "--version", action="version", version="%(prog)s " + get_rocker_version()
     )
-    parser.add_argument("--debug-inside", action="store_true")
+
+    sub_parsers= main_parser.add_subparsers(title="test")
+    test_parser = sub_parsers.add_parser("test")
+
+    test_parser.add_argument("estimator_image")
+    test_parser.add_argument("dataset_directory")
+    test_parser.add_argument("--debug-inside", action="store_true")
 
     extension_manager = RockerExtensionManager()
     default_args = {"cuda": True, "network": "host"}
-    extension_manager.extend_cli_parser(parser, default_args)
+    extension_manager.extend_cli_parser(test_parser, default_args)
 
-    args = parser.parse_args()
+    args = main_parser.parse_args()
     args_dict = vars(args)
 
     # Confirm dataset directory is absolute
@@ -81,7 +85,7 @@ def main():
     )
     tester_thread.start()
 
-    dig = DockerImageGenerator(active_extensions, args_dict, args_dict["test_image"])
+    dig = DockerImageGenerator(active_extensions, args_dict, args_dict["estimator_image"])
 
     exit_code = dig.build(**vars(args))
     if exit_code != 0:
@@ -92,6 +96,5 @@ def main():
         args_dict["command"] = "bash"
 
     result = dig.run(**args_dict)
-    # TODO clean up th            "bpc = ibpc.ibpc:main",
-reads here
+    # TODO clean up threads here
     return result

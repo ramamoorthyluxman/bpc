@@ -4,9 +4,9 @@ This is the python entrypoint for the Industrial Bin Picking Challenge
 
 ## Usage
 
-`ibpc <Pose Estimator Image Name> ~/<Path to dataset to test>`
+`ibpc test <Pose Estimator Image Name> ~/<Path to dataset to test>`
 
-`ibpc ibpc:pose_estimator ~/ws/ibpc/lm`
+`ibpc test ibpc:pose_estimator ~/ws/ibpc/lm`
 
 
 ## Prerequisites
