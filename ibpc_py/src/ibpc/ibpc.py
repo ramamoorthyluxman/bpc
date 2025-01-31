@@ -19,7 +19,7 @@ def main():
         "-v", "--version", action="version", version="%(prog)s " + get_rocker_version()
     )
 
-    sub_parsers= main_parser.add_subparsers(title="test")
+    sub_parsers = main_parser.add_subparsers(title="test")
     test_parser = sub_parsers.add_parser("test")
 
     test_parser.add_argument("estimator_image")
@@ -85,7 +85,9 @@ def main():
     )
     tester_thread.start()
 
-    dig = DockerImageGenerator(active_extensions, args_dict, args_dict["estimator_image"])
+    dig = DockerImageGenerator(
+        active_extensions, args_dict, args_dict["estimator_image"]
+    )
 
     exit_code = dig.build(**vars(args))
     if exit_code != 0:
