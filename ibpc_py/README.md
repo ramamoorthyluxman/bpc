@@ -4,9 +4,9 @@ This is the python entrypoint for the Industrial Bin Picking Challenge
 
 ## Usage
 
-`ibpc test <Pose Estimator Image Name> ~/<Path to dataset to test>`
+`bpc test <Pose Estimator Image Name> ~/<Path to dataset to test>`
 
-`ibpc test ibpc:pose_estimator ~/ws/ibpc/lm`
+`bpc test ibpc:pose_estimator ~/ws/ibpc/lm`
 
 
 ## Prerequisites
@@ -24,4 +24,3 @@ Temporary before rocker release of https://github.com/osrf/rocker/pull/317/
 ### Nvidia Docker (optoinal)
 Make sure nvidia_docker is installed if you want cuda. 
 
-Add `--cuda` to your command line options

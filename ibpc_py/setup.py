@@ -28,7 +28,7 @@ setuptools.setup(
     zip_safe=False,
     entry_points={
         "console_scripts": [
-            "ibpc = ibpc.ibpc:main",
+            "bpc = ibpc.ibpc:main",
         ],
     },
 )
