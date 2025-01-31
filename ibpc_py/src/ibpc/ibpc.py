@@ -10,6 +10,7 @@ from rocker.core import OPERATIONS_NON_INTERACTIVE
 
 from io import BytesIO
 from urllib.request import urlopen
+import urllib.request
 from zipfile import ZipFile
 
 
@@ -17,7 +18,9 @@ def get_bop_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/{modelname}"
 
 
-available_datasets = {"lm": get_bop_template("lm")}
+def get_ipb_template(modelname):
+    return f"https://huggingface.co/datasets/bop-benchmark/{modelname}/resolve/main/{modelname}"
+
 
 bop_suffixes = [
     "_base.zip",
@@ -26,11 +29,22 @@ bop_suffixes = [
     "_train_pbr.zip",
 ]
 
+ipb_suffixes = [s for s in bop_suffixes]
+ipb_suffixes.append("_val.zip")
+ipb_suffixes.append("_test_all.z01")
 
-def fetch_bop_dataset(dataset, output_path):
-    for suffix in bop_suffixes:
+available_datasets = {
+    "ipb": (get_ipb_template("ipb"), ipb_suffixes),
+    "lm": (get_bop_template("lm"), bop_suffixes),
+}
 
-        url = get_bop_template(dataset) + suffix
+
+def fetch_dataset(dataset, output_path):
+    (url_base, suffixes) = available_datasets[dataset]
+    for suffix in suffixes:
+
+        url = url_base + suffix
+        print(f"Downloading from url: {url}")
         with urlopen(url) as zipurlfile:
             with ZipFile(BytesIO(zipurlfile.read())) as zfile:
                 zfile.extractall(output_path)
@@ -55,7 +69,7 @@ def main():
     test_parser.add_argument("--debug-inside", action="store_true")
 
     fetch_parser = sub_parsers.add_parser("fetch")
-    fetch_parser.add_argument("dataset", choices=["lm"])
+    fetch_parser.add_argument("dataset", choices=available_datasets.keys())
     fetch_parser.add_argument("--dataset-path", default=".")
 
     extension_manager = RockerExtensionManager()
@@ -66,7 +80,7 @@ def main():
     args_dict = vars(args)
     if args.subparser_name == "fetch":
         print(f"Fetching dataset {args_dict['dataset']} to {args_dict['dataset_path']}")
-        fetch_bop_dataset(args_dict["dataset"], args_dict["dataset_path"])
+        fetch_dataset(args_dict["dataset"], args_dict["dataset_path"])
         print("Fetch complete")
         return
 
