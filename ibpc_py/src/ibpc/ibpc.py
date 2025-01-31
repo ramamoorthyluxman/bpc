@@ -8,6 +8,33 @@ from rocker.core import get_rocker_version
 from rocker.core import RockerExtensionManager
 from rocker.core import OPERATIONS_NON_INTERACTIVE
 
+from io import BytesIO
+from urllib.request import urlopen
+from zipfile import ZipFile
+
+
+def get_bop_template(modelname):
+    return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/{modelname}"
+
+
+available_datasets = {"lm": get_bop_template("lm")}
+
+bop_suffixes = [
+    "_base.zip",
+    "_models.zip",
+    "_test_all.zip",
+    "_train_pbr.zip",
+]
+
+
+def fetch_bop_dataset(dataset, output_path):
+    for suffix in bop_suffixes:
+
+        url = get_bop_template(dataset) + suffix
+        with urlopen(url) as zipurlfile:
+            with ZipFile(BytesIO(zipurlfile.read())) as zfile:
+                zfile.extractall(output_path)
+
 
 def main():
 
@@ -19,12 +46,16 @@ def main():
         "-v", "--version", action="version", version="%(prog)s " + get_rocker_version()
     )
 
-    sub_parsers = main_parser.add_subparsers(title="test")
+    sub_parsers = main_parser.add_subparsers(title="test", dest="subparser_name")
     test_parser = sub_parsers.add_parser("test")
 
     test_parser.add_argument("estimator_image")
     test_parser.add_argument("dataset_directory")
     test_parser.add_argument("--debug-inside", action="store_true")
+
+    fetch_parser = sub_parsers.add_parser("fetch")
+    fetch_parser.add_argument("dataset", choices=["lm"])
+    fetch_parser.add_argument("--dataset-path", default=".")
 
     extension_manager = RockerExtensionManager()
     default_args = {"cuda": True, "network": "host"}
@@ -32,6 +63,10 @@ def main():
 
     args = main_parser.parse_args()
     args_dict = vars(args)
+    if args.subparser_name == "fetch":
+        print("called fetch_dataset")
+        fetch_bop_dataset(args_dict["dataset"], args_dict["dataset_path"])
+        return
 
     # Confirm dataset directory is absolute
     args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
