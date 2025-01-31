@@ -76,20 +76,10 @@ def main():
     tester_thread = threading.Thread(target=run_instance, args=(dig_zenoh, zenoh_args))
     tester_thread.start()
 
-    # TODO Redirect stdout
-    import time
-
-    time.sleep(3)
-
     tester_thread = threading.Thread(
         target=run_instance, args=(dig_tester, tester_args)
     )
     tester_thread.start()
-    # TODO Redirect stdout
-
-    import time
-
-    time.sleep(3)
 
     dig = DockerImageGenerator(active_extensions, args_dict, args_dict["test_image"])
 
@@ -102,5 +92,6 @@ def main():
         args_dict["command"] = "bash"
 
     result = dig.run(**args_dict)
-    # TODO clean up threads here
+    # TODO clean up th            "bpc = ibpc.ibpc:main",
+reads here
     return result
