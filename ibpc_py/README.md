@@ -4,9 +4,14 @@ This is the python entrypoint for the Industrial Bin Picking Challenge
 
 ## Usage
 
-`bpc test <Pose Estimator Image Name> ~/<Path to dataset to test>`
+Get a dataset
+`bpc fetch lm`
 
-`bpc test ibpc:pose_estimator ~/ws/ibpc/lm`
+
+Run tests against a dataset
+`bpc test <Pose Estimator Image Name> <datasetname> `
+
+`bpc test ibpc:pose_estimator lm`
 
 
 ## Prerequisites
