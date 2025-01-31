@@ -104,7 +104,3 @@ def main():
     result = dig.run(**args_dict)
     # TODO clean up threads here
     return result
-
-
-if __name__ == "__main__":
-    main()
