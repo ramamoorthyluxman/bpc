@@ -108,6 +108,10 @@ rocker --nvidia --cuda run --network=host ibpc:pose_estimator
 docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester
 ```
 
+## Baseline Solution
+
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/Yadunund/bpc/tree/baseline_solution) branch and follow the instructions there.
+
 ## Next Steps
 
 Stay tuned – more detailed submission instructions and guidelines will be provided soon.
