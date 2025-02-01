@@ -80,8 +80,6 @@ docker buildx build -t ibpc:pose_estimator \
 cd ~/ws_ibpc/src/ibpc
 docker buildx build -t ibpc:tester \
     --file ./Dockerfile.tester \
-    --build-arg="BOP_PATH=datasets" \
-    --build-arg="DATASET_NAME=lm" \
     .
 ```
 
