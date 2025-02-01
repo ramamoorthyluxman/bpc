@@ -18,7 +18,7 @@ def get_bop_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/{modelname}"
 
 
-def get_ipb_template(modelname):
+def get_ipd_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/{modelname}/resolve/main/{modelname}"
 
 
@@ -29,12 +29,12 @@ bop_suffixes = [
     "_train_pbr.zip",
 ]
 
-ipb_suffixes = [s for s in bop_suffixes]
-ipb_suffixes.append("_val.zip")
-ipb_suffixes.append("_test_all.z01")
+ipd_suffixes = [s for s in bop_suffixes]
+ipd_suffixes.append("_val.zip")
+ipd_suffixes.append("_test_all.z01")
 
 available_datasets = {
-    "ipb": (get_ipb_template("ipb"), ipb_suffixes),
+    "ipd": (get_ipd_template("ipd"), ipd_suffixes),
     "lm": (get_bop_template("lm"), bop_suffixes),
 }
 
