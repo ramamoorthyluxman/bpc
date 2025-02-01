@@ -10,12 +10,12 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 This repository contains the sample submission code and evaluation service for the Bin Picking Challenge – both based on ROS 2.
 
 - **Estimator:**  
-  The estimator code represents the sample submission. Participants need to edit and improve this ROS 2 node, then build and submit a Docker container containing their solution.
+  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py`. The tester will invoke participant's solution implementation through ROS 2 nodes via the `get_pose_estimates` function.
 
 - **Tester:**  
-  The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server. It is provided for reference only.
+  The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only.
 
-In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) which facilitates downloading the challenge data and performing other related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
 ## Submission Instructions
 
