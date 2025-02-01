@@ -27,7 +27,7 @@ In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/bpc/tree/
 The core architecture of the challenge is based on ROS 2. Participants are required to respond to a ROS 2 Service request with pose estimation results. The key elements of the architecture are:
 
 - **Service API:**  
-  The ROS service interface (defined in the `.srv` file) acts as the API for the challenge. 
+  The ROS service interface (defined in the [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv) file) acts as the API for the challenge. 
 
 - **PoseEstimatorNode:**  
   Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available ROS 2 client libraries including C++, Python, Rust, Node.js, or C#.
