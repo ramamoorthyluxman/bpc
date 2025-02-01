@@ -71,7 +71,7 @@ cd bpc/
 wget https://storage.googleapis.com/akasha-public/IPBC/baseline_solution/v1/models.zip
 unzip models.zip
 rm models.zip
-git clone https://github.com/KalraA/bpc_baseline/
+git clone https://github.com/CIRP-Lab/bpc_baseline
 ```
 
 ### Build the ibpc_pose_estimator
