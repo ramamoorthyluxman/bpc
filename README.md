@@ -99,7 +99,7 @@ docker run --network=host ibpc:pose_estimator
 
 ### Run the tester
 
-> Note: The BOP_PATH environment variable should point to a folder that contains models in the BOP format. See [BOP Datasets](https://bop.felk.cvut.cz/datasets/) for more details.
+> Note: Substitute the <PATH_TO_DATASET> with the location of the IPD dataset you've downloaded.
 
 ```bash
 docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester 
