@@ -10,12 +10,35 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 This repository contains the sample submission code and evaluation service for the Bin Picking Challenge – both based on ROS 2.
 
 - **Estimator:**  
-  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py`. The tester will invoke participant's solution implementation through ROS 2 nodes via the `get_pose_estimates` function.
+  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py` (or its C++ counterpart). The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
 
 - **Tester:**  
-  The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only.
+  The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only. It loads the test dataset, prepares image inputs, invokes the estimator service repeatedly, collects the results, and submits for further evaluation.
 
 In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+
+## Design
+
+### ROS-based Framework
+
+The core architecture of the challenge is based on ROS 2. Participants are required to respond to a ROS 2 Service request with pose estimation results. The key elements of the architecture are:
+
+- **Service API:**  
+  The ROS service interface (defined in the `.srv` file) acts as the API for the challenge. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
+
+- **PoseEstimatorNode:**  
+  Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available ROS 2 client libraries including C++, Python, Rust, Node.js, or C#.
+
+- **TesterNode:**  
+  A fully implemented TesterNode is provided that:
+  - Uses the bop_toolkit_lib to load the test dataset and prepare image inputs.
+  - Repeatedly calls the PoseEstimatorNode service over the `/get_pose_estimates` endpoint.
+  - Collects and combines results from multiple service calls.
+  - Saves the compiled results to disk in CSV format.
+
+### Containerization
+
+To simplify the evaluation process, Dockerfiles are provided to generate container images for both the PoseEstimatorNode and the TesterNode. This ensures that users can run their models without having to configure a dedicated ROS environment manually.
 
 ## Submission Instructions
 
@@ -28,6 +51,7 @@ Participants are expected to modify the estimator code to implement their soluti
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
 ## Setup
+
 
 ```bash
 mkdir ~/ws_ibpc/src -p
