@@ -102,7 +102,7 @@ docker run --network=host ibpc:pose_estimator
 > Note: The BOP_PATH environment variable should point to a folder that contains models in the BOP format. See [BOP Datasets](https://bop.felk.cvut.cz/datasets/) for more details.
 
 ```bash
-docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -v/home/tullyfoote/ws/ibpc/lm:/opt/ros/underlay/install/datasets/lm -it ibpc:tester 
+docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester 
 ```
 
 ## Next Steps
