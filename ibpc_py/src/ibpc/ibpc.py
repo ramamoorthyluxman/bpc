@@ -67,6 +67,9 @@ def main():
     test_parser.add_argument("dataset")
     test_parser.add_argument("--dataset_directory", action="store", default=".")
     test_parser.add_argument("--debug-inside", action="store_true")
+    test_parser.add_argument(
+        "--tester-image", default="ghcr.io/yadunund/ibpc/estimator-tester:latest"
+    )
 
     fetch_parser = sub_parsers.add_parser("fetch")
     fetch_parser.add_argument("dataset", choices=available_datasets.keys())
@@ -105,7 +108,9 @@ def main():
     }
     print("Buiding tester env")
     tester_extensions = extension_manager.get_active_extensions(tester_args)
-    dig_tester = DockerImageGenerator(tester_extensions, tester_args, "ibpc:tester")
+    dig_tester = DockerImageGenerator(
+        tester_extensions, tester_args, args_dict["tester_image"]
+    )
 
     exit_code = dig_tester.build(**tester_args)
     if exit_code != 0:
