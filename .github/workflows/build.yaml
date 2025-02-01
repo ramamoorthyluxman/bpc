@@ -37,4 +37,5 @@ jobs:
         with:
           file: Dockerfile.tester
           load: true
-          tags: ${{ env.TEST_TAG }}
+          push: true
+          tags: ghcr.io/yadunund/ibpc/estimator-tester:latest
