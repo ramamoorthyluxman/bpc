@@ -7,7 +7,7 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 
 ## Overview
 
-This repository contains the ROS interfaces, sample submission code and evaluation service for the Bin Picking Challenge.
+This repository contains the ROS interfaces, sample submission code and evaluation service for the Perception Challenge For Bin-Picking.
 
 - **Estimator:**  
   The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py` (or its C++ counterpart). The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
