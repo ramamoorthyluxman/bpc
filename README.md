@@ -110,7 +110,7 @@ docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLI
 
 ## Baseline Solution
 
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator`. Please refer to the [baseline_solution](https://github.com/Yadunund/bpc/tree/baseline_solution) branch and follow the instructions there.
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/Yadunund/bpc/tree/baseline_solution) branch and follow the instructions there.
 
 ## Next Steps
 
