@@ -1,11 +1,16 @@
 # todo(Yadunund): Add copyright.
-
+import time
+import os
 import cv2
 from cv_bridge import CvBridge
 import numpy as np
 from scipy.spatial.transform import Rotation
 import sys
 from typing import List, Optional, Union
+from bpc.inference.process_pose import PoseEstimator as PoseEstimatorBP
+from bpc.inference.process_pose import PoseEstimatorParams
+from bpc.utils.data_utils import Capture
+
 
 from geometry_msgs.msg import Pose as PoseMsg
 from ibpc_interfaces.msg import Camera as CameraMsg
@@ -77,12 +82,18 @@ class Camera:
             self.dolp: Optional[np.ndarray] = None
 
 
+def rot_to_quat(rot):
+    r = Rotation.from_matrix(rot)
+    q = r.as_quat()
+    return q
+
 class PoseEstimator(Node):
 
     def __init__(self):
         super().__init__("ibp_pose_estimator")
         self.get_logger().info("Starting ibpc_pose_estimator...")
         # Declare parameters
+        self.model_cache = {}
         self.model_dir = (
             self.declare_parameter("model_dir", "").get_parameter_value().string_value
         )
@@ -100,27 +111,60 @@ class PoseEstimator(Node):
         if len(request.cameras) < 3:
             self.get_logger().warn("Received request with insufficient cameras.")
             return response
-        try:
-            cam_1 = Camera(request.cameras[0])
-            cam_2 = Camera(request.cameras[1])
-            cam_3 = Camera(request.cameras[2])
-            photoneo = Camera(request.photoneo)
-            response.pose_estimates = self.get_pose_estimates(
-                request.object_ids, cam_1, cam_2, cam_3, photoneo
-            )
-        except:
-            self.get_logger().error("Error calling get_pose_estimates.")
+        # try:
+        cam_1 = Camera(request.cameras[0])
+        cam_2 = Camera(request.cameras[1])
+        cam_3 = Camera(request.cameras[2])
+        photoneo = Camera(request.photoneo)
+        response.pose_estimates = self.get_pose_estimates(
+            request.object_ids, cam_1, cam_2, cam_3, photoneo
+        )
+        # except:
+        #     self.get_logger().error("Error calling get_pose_estimates.")
         return response
 
     def get_pose_estimates(
+        self,
         object_ids: List[int],
         cam_1: Camera,
         cam_2: Camera,
         cam_3: Camera,
         photoneo: Camera,
     ) -> List[PoseEstimateMsg]:
-
         pose_estimates = []
+        for object_id in object_ids:
+            if object_id not in self.model_cache:
+                yolo_model_path = os.path.join(self.model_dir, f'detection/obj_{object_id}/yolo11-detection-obj_{object_id}.pt')
+                pose_model_path = os.path.join(self.model_dir, f'rot_models/rot_{object_id}.pth')
+
+                pose_params = PoseEstimatorParams(yolo_model_path=yolo_model_path,
+                                                pose_model_path=pose_model_path, 
+                                                yolo_conf_thresh=0.1)
+                pose_estimator = PoseEstimatorBP(pose_params)
+                self.model_cache[object_id] = pose_estimator
+            pose_estimator = self.model_cache[object_id]
+            t = time.time()
+            cams = [cam_1, cam_2, cam_3]
+            images = [np.tile(x.rgb[:,:,None], (1, 1, 3)) for x in cams]
+            RTs = [x.pose for x in cams]
+            Ks = [x.intrinsics for x in cams]
+            capture = Capture(images, Ks, RTs, object_id)
+            detections = pose_estimator._detect(capture)
+            pose_predictions = pose_estimator._match(capture, detections)
+            pose_estimator._estimate_rotation(pose_predictions)
+            for detection in pose_predictions:
+                pose_estimate = PoseEstimateMsg()
+                pose_estimate.obj_id = object_id
+                pose_estimate.score = 1.0
+                pose_estimate.pose.pose.position.x = detection.pose[0, 3]
+                pose_estimate.pose.pose.position.y = detection.pose[1, 3]
+                pose_estimate.pose.pose.position.z = detection.pose[2, 3]
+                rot = rot_to_quat(detection.pose[:3, :3])
+                pose_estimate.pose.pose.orientation.x = rot[0]
+                pose_estimate.pose.pose.orientation.y = rot[1]
+                pose_estimate.pose.pose.orientation.z = rot[2]
+                pose_estimate.pose.pose.orientation.w = rot[3]
+                pose_estimates.append(pose_estimate)
         """
             Your implementation goes here.
             msg = PoseEstimateMsg()

@@ -54,6 +54,7 @@ RUN . /opt/ros/jazzy/setup.sh \
     --merge-install
 
 ADD ${MODEL_DIR} /opt/ros/underlay/install/models
+COPY bpc_baseline /opt/ros/underlay/install/bpc_baseline/
 
 FROM underlay AS overlay
 
@@ -82,6 +83,12 @@ RUN . /opt/ros/jazzy/setup.sh \
 
 # result stage: base + copied install folders from the overlay + service setup.
 FROM base
+RUN apt-get update
+RUN apt-get install -y libegl1-mesa-dev libgles2-mesa-dev libx11-dev libxext-dev libxrender-dev python3-pip
+RUN python3 -m pip install --upgrade setuptools --break-system-packages
+COPY bpc_baseline/docker/requirements.txt .
+RUN pip install -r requirements.txt --break-system-packages
+
 
 ARG SERVICE_PACKAGE=ibpc_pose_estimator_py
 ARG SERVICE_EXECUTABLE_NAME=ibpc_pose_estimator
@@ -105,6 +112,7 @@ RUN sed --in-place \
 ENV SERVICE_PACKAGE=${SERVICE_PACKAGE}
 ENV SERVICE_EXECUTABLE_NAME=${SERVICE_EXECUTABLE_NAME}
 ENV MODEL_DIR=/opt/ros/underlay/install/models
+ENV PYTHONPATH=$PYTHONPATH:/opt/ros/underlay/install/bpc_baseline/
 
 CMD exec /opt/ros/overlay/install/lib/${SERVICE_PACKAGE}/${SERVICE_EXECUTABLE_NAME} \
     --ros-args -p model_dir:=${MODEL_DIR}
