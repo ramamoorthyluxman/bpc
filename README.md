@@ -30,7 +30,7 @@ The core architecture of the challenge is based on ROS 2. Participants are requi
   The ROS service interface (defined in the [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv) file) acts as the API for the challenge. 
 
 - **PoseEstimatorNode:**  
-  Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available ROS 2 client libraries including C++, Python, Rust, Node.js, or C#.
+  Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available [ROS 2 client libraries](https://docs.ros.org/en/jazzy/Concepts/Basic/About-Client-Libraries.html#client-libraries) including C++, Python, Rust, Node.js, or C#. Please use [ROS 2 Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html).
 
 - **TesterNode:**  
   A fully implemented TesterNode is provided that:
