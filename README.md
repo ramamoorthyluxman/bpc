@@ -18,7 +18,7 @@ This repository contains the ROS interfaces, sample submission code and evaluati
 - **ROS Interface:**  
   The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
-In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
 ## Design
 
