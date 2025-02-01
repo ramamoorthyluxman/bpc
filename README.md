@@ -7,13 +7,16 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 
 ## Overview
 
-This repository contains the sample submission code and evaluation service for the Bin Picking Challenge – both based on ROS 2.
+This repository contains the ROS interfaces, sample submission code and evaluation service for the Bin Picking Challenge.
 
 - **Estimator:**  
   The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py` (or its C++ counterpart). The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
 
 - **Tester:**  
   The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only. It loads the test dataset, prepares image inputs, invokes the estimator service repeatedly, collects the results, and submits for further evaluation.
+
+- **ROS Interface:**  
+  The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
 In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
@@ -24,7 +27,7 @@ In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/ibpc_py) 
 The core architecture of the challenge is based on ROS 2. Participants are required to respond to a ROS 2 Service request with pose estimation results. The key elements of the architecture are:
 
 - **Service API:**  
-  The ROS service interface (defined in the `.srv` file) acts as the API for the challenge. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
+  The ROS service interface (defined in the `.srv` file) acts as the API for the challenge. 
 
 - **PoseEstimatorNode:**  
   Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available ROS 2 client libraries including C++, Python, Rust, Node.js, or C#.
