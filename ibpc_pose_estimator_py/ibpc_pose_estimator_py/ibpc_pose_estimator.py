@@ -156,20 +156,22 @@ class PoseEstimator(Node):
                 pose_estimate = PoseEstimateMsg()
                 pose_estimate.obj_id = object_id
                 pose_estimate.score = 1.0
-                pose_estimate.pose.pose.position.x = detection.pose[0, 3]
-                pose_estimate.pose.pose.position.y = detection.pose[1, 3]
-                pose_estimate.pose.pose.position.z = detection.pose[2, 3]
+                pose_estimate.pose.position.x = detection.pose[0, 3]
+                pose_estimate.pose.position.y = detection.pose[1, 3]
+                pose_estimate.pose.position.z = detection.pose[2, 3]
                 rot = rot_to_quat(detection.pose[:3, :3])
-                pose_estimate.pose.pose.orientation.x = rot[0]
-                pose_estimate.pose.pose.orientation.y = rot[1]
-                pose_estimate.pose.pose.orientation.z = rot[2]
-                pose_estimate.pose.pose.orientation.w = rot[3]
+                pose_estimate.pose.orientation.x = rot[0]
+                pose_estimate.pose.orientation.y = rot[1]
+                pose_estimate.pose.orientation.z = rot[2]
+                pose_estimate.pose.orientation.w = rot[3]
                 pose_estimates.append(pose_estimate)
         """
             Your implementation goes here.
             msg = PoseEstimateMsg()
             # your logic here.
             pose_estimates.append(msg)
+            
+
         """
         return pose_estimates
 

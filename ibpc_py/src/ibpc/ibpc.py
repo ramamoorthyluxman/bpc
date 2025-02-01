@@ -18,7 +18,7 @@ def get_bop_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/{modelname}"
 
 
-def get_ipb_template(modelname):
+def get_ipd_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/{modelname}/resolve/main/{modelname}"
 
 
@@ -29,12 +29,12 @@ bop_suffixes = [
     "_train_pbr.zip",
 ]
 
-ipb_suffixes = [s for s in bop_suffixes]
-ipb_suffixes.append("_val.zip")
-ipb_suffixes.append("_test_all.z01")
+ipd_suffixes = [s for s in bop_suffixes]
+ipd_suffixes.append("_val.zip")
+ipd_suffixes.append("_test_all.z01")
 
 available_datasets = {
-    "ipb": (get_ipb_template("ipb"), ipb_suffixes),
+    "ipd": (get_ipd_template("ipd"), ipd_suffixes),
     "lm": (get_bop_template("lm"), bop_suffixes),
 }
 
@@ -67,6 +67,9 @@ def main():
     test_parser.add_argument("dataset")
     test_parser.add_argument("--dataset_directory", action="store", default=".")
     test_parser.add_argument("--debug-inside", action="store_true")
+    test_parser.add_argument(
+        "--tester-image", default="ghcr.io/yadunund/bpc/estimator-tester:latest"
+    )
 
     fetch_parser = sub_parsers.add_parser("fetch")
     fetch_parser.add_argument("dataset", choices=available_datasets.keys())
@@ -105,7 +108,9 @@ def main():
     }
     print("Buiding tester env")
     tester_extensions = extension_manager.get_active_extensions(tester_args)
-    dig_tester = DockerImageGenerator(tester_extensions, tester_args, "ibpc:tester")
+    dig_tester = DockerImageGenerator(
+        tester_extensions, tester_args, args_dict["tester_image"]
+    )
 
     exit_code = dig_tester.build(**tester_args)
     if exit_code != 0:
