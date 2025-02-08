@@ -5,6 +5,7 @@ from cv_bridge import CvBridge
 import numpy as np
 from pathlib import Path
 import sys
+import pandas as pd
 
 import rclpy
 from rclpy.node import Node
@@ -138,6 +139,22 @@ class BOPCamera:
         self.t = self.camera_params["cam_t_w2c"]
 
 
+def pose_msg_to_rt(pose_msg):
+    # Convert quaternion to rotation matrix
+    r = Rotation.from_quat([
+        pose_msg.orientation.x,
+        pose_msg.orientation.y,
+        pose_msg.orientation.z,
+        pose_msg.orientation.w
+    ])
+    R = r.as_matrix().flatten().tolist()
+    
+    # Get translation
+    t = [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z]
+    
+    return R, t
+
+
 def main(argv=sys.argv):
     rclpy.init(args=argv)
     args_without_ros = rclpy.utilities.remove_ros_args(argv)
@@ -180,7 +197,10 @@ def main(argv=sys.argv):
         node.get_logger().info(
             "/get_pose_estimates service not available, waiting again..."
         )
-    results = {}
+
+    # Create list to store results
+    results = []
+
     # Get pose estimates for every image in every scene.
     for scene_id in test_split["scene_ids"]:
         scene_dir = Path(test_split["split_path"]) / "{scene_id:06d}".format(
@@ -211,14 +231,30 @@ def main(argv=sys.argv):
             )
             future = client.call_async(request)
             rclpy.spin_until_future_complete(node, future)
+            
             if future.result() is not None:
                 node.get_logger().info(f"Got results: {future.result().pose_estimates}")
+                # Process results and add to results list
+                for pose_estimate in future.result().pose_estimates:
+                    R, t = pose_msg_to_rt(pose_estimate.pose)
+                    results.append({
+                        'scene_id': scene_id,
+                        'im_id': img_id,
+                        'obj_id': pose_estimate.obj_id,
+                        'score': pose_estimate.score,
+                        'R': R,
+                        't': t,
+                        'time': -1
+                    })
             else:
                 node.get_logger().error(
                     "Exception while calling service: %r" % future.exception()
                 )
-        # todo(Yadunund): Remove break after dataset is fixed.
-        break
+
+    # Convert results to DataFrame and save
+    df = pd.DataFrame(results)
+    df.to_csv('submission.csv', index=False)
+    node.get_logger().info("Results saved to submission.csv")
 
     node.destroy_node()
     rclpy.try_shutdown()
