@@ -9,6 +9,8 @@ import subprocess
 from rocker.core import DockerImageGenerator
 from rocker.core import get_rocker_version
 from rocker.core import RockerExtensionManager
+from rocker.core import OPERATIONS_DRY_RUN
+from rocker.core import OPERATIONS_INTERACTIVE
 from rocker.core import OPERATIONS_NON_INTERACTIVE
 
 from io import BytesIO
@@ -142,6 +144,7 @@ def main():
     test_parser.add_argument("estimator_image")
     test_parser.add_argument("dataset")
     test_parser.add_argument("--dataset_directory", action="store", default=".")
+    test_parser.add_argument("--result_directory", action="store", default=".")
     test_parser.add_argument("--debug-inside", action="store_true")
     test_parser.add_argument(
         "--tester-image", default="ghcr.io/opencv/bpc/estimator-tester:latest"
@@ -163,11 +166,6 @@ def main():
         print("Fetch complete")
         return
 
-    # Confirm dataset directory is absolute
-    args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
-
-    active_extensions = extension_manager.get_active_extensions(args_dict)
-    print("Active extensions %s" % [e.get_name() for e in active_extensions])
 
     tester_args = {
         "network": "host",
@@ -179,7 +177,9 @@ def main():
         ],
         "console_output_file": "ibpc_test_output.log",
         "volume": [
-            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets"]
+            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets",
+             f"{args_dict['result_directory']}:/submission",
+             ]
         ],
     }
     print("Buiding tester env")
@@ -197,10 +197,10 @@ def main():
         "network": "host",
         "extension_blacklist": {},
         "console_output_file": "ibpc_zenoh_output.log",
-        "operating_mode": OPERATIONS_NON_INTERACTIVE,
+        "mode": OPERATIONS_NON_INTERACTIVE,
         "volume": [],
     }
-    zenoh_extensions = extension_manager.get_active_extensions(tester_args)
+    zenoh_extensions = extension_manager.get_active_extensions(zenoh_args)
 
     print("Buiding zenoh env")
     dig_zenoh = DockerImageGenerator(
@@ -222,6 +222,16 @@ def main():
     )
     tester_thread.start()
 
+    args_dict["network"] = "host"
+    args_dict["extension_blacklist"] = {},
+
+    # Confirm dataset directory is absolute
+    args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
+
+    active_extensions = extension_manager.get_active_extensions(args_dict)
+    print("Active extensions %s" % [e.get_name() for e in active_extensions])
+
+
     dig = DockerImageGenerator(
         active_extensions, args_dict, args_dict["estimator_image"]
     )
@@ -232,7 +242,8 @@ def main():
         return exit_code
 
     if args.debug_inside:
-        args_dict["command"] = "bash"
+        args_dict["command"] = "/bin/bash"
+        args_dict["mode"] = OPERATIONS_INTERACTIVE
 
     result = dig.run(**args_dict)
     # TODO clean up threads here
