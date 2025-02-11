@@ -1,9 +1,11 @@
 # Perception Challenge For Bin-Picking
 
-[![build](https://github.com/Yadunund/ibpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/Yadunund/ibpc/actions/workflows/build.yaml)
-[![style](https://github.com/Yadunund/ibpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/Yadunund/ibpc/actions/workflows/style.yaml)
+[![build](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
+[![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
 
 For more details on the challenge, [click here](https://bpc.opencv.org/).
+
+![](../media/bpc.gif)
 
 ## Overview
 
@@ -18,7 +20,7 @@ This repository contains the ROS interfaces, sample submission code and evaluati
 - **ROS Interface:**
   The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
-In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
 ## Design
 
@@ -58,9 +60,9 @@ Participants are expected to modify the estimator code to implement their soluti
 
 
 ```bash
-mkdir -p ~/ws_ibpc/src
-cd ~/ws_ibpc/src
-git clone https://github.com/Yadunund/ibpc.git
+mkdir -p ~/ws_bpc/src
+cd ~/ws_bpc/src
+git clone https://github.com/opencv/bpc.git
 ```
 
 ## Build
@@ -77,7 +79,7 @@ git clone https://github.com/CIRP-Lab/bpc_baseline
 ### Build the ibpc_pose_estimator
 
 ```bash
-cd ~/ws_ibpc/src/ibpc
+cd ~/ws_bpc/src/bpc
 docker buildx build -t ibpc:pose_estimator \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
@@ -87,7 +89,7 @@ docker buildx build -t ibpc:pose_estimator \
 ### Build the ibpc_tester
 
 ```bash
-cd ~/ws_ibpc/src/ibpc
+cd ~/ws_bpc/src/bpc
 docker buildx build -t ibpc:tester \
     --file ./Dockerfile.tester \
     .
@@ -102,14 +104,14 @@ docker run --init --rm --net host eclipse/zenoh:1.1.1 --no-multicast-scouting
 ```
 
 ### Run the pose estimator
-We use [rocker](https://github.com/osrf/rocker) to add GPU support to Docker containers. To install rocker, run `pip install rocker` on the host machine. 
+We use [rocker](https://github.com/osrf/rocker) to add GPU support to Docker containers. To install rocker, run `pip install rocker` on the host machine.
 ```bash
 rocker --nvidia --cuda run --network=host ibpc:pose_estimator
 ```
 
 ### Run the tester
 
-> Note: Substitute the <PATH_TO_DATASET> with the location of the IPD dataset you've downloaded.
+> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset.
 
 ```bash
 docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester
