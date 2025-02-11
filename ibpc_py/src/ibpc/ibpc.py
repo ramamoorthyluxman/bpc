@@ -204,7 +204,7 @@ def main():
 
     print("Buiding zenoh env")
     dig_zenoh = DockerImageGenerator(
-        zenoh_extensions, zenoh_args, "eclipse/zenoh:1.1.1"
+        zenoh_extensions, zenoh_args, "eclipse/zenoh:1.2.1"
     )
     exit_code = dig_zenoh.build(**zenoh_args)
     if exit_code != 0:

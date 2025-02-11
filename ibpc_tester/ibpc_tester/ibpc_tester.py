@@ -175,6 +175,22 @@ def main(argv=sys.argv):
     node.get_logger().info(
         f"Loading from dataset {dataset_name} with split_type {split_type}."
     )
+    output_dir = Path(
+        node.declare_parameter("output_dir", "/submission")
+        .get_parameter_value()
+        .string_value
+    )
+    output_filename = (
+        node.declare_parameter("output_filename", "submission.csv")
+        .get_parameter_value()
+        .string_value
+    )
+    try:
+        output_filepath = (output_dir / output_filename).resolve()
+    except Exception as e:
+        print(f"Error creating filepath: {e}")
+        output_filepath = filename
+    node.get_logger().info(f"Submission results will be written to {output_filepath}.")
 
     debug_cam_1 = None
     debug_cam_2 = None
@@ -257,8 +273,8 @@ def main(argv=sys.argv):
 
     # Convert results to DataFrame and save
     df = pd.DataFrame(results)
-    df.to_csv("submission.csv", index=False)
-    node.get_logger().info("Results saved to submission.csv")
+    df.to_csv(output_filepath, index=False)
+    node.get_logger().info(f"Results saved to {output_filepath}")
 
     node.destroy_node()
     rclpy.try_shutdown()
