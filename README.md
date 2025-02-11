@@ -91,7 +91,7 @@ docker buildx build -t ibpc:tester \
 ### Start the Zenoh router
 
 ```bash
-docker run --init --rm --net host eclipse/zenoh:1.1.1 --no-multicast-scouting
+docker run --init --rm --net host eclipse/zenoh:1.2.1 --no-multicast-scouting
 ```
 
 ### Run the pose estimator
@@ -102,10 +102,10 @@ rocker --nvidia --cuda run --network=host ibpc:pose_estimator
 
 ### Run the tester
 
-> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset.
+> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset. Similarly, substitute <PATH_TO_OUTPUT_DIR> with the directory that should contain the results from the pose estimator. By default, the results will be saved as a `submission.csv` file but this filename can be updated by setting the `OUTPUT_FILENAME` environment variable.
 
 ```bash
-docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester
+docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it ibpc:tester
 ```
 
 ## Baseline Solution
