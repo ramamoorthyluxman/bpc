@@ -11,6 +11,7 @@
   <exec_depend>ibpc_interfaces</exec_depend>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>python3-pandas</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

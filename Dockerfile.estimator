@@ -37,12 +37,6 @@ FROM underlay AS overlay
 ARG SERVICE_PACKAGE=ibpc_pose_estimator_py
 ARG SERVICE_EXECUTABLE_NAME=ibpc_pose_estimator
 
-# TODO(Yadunund): Remove this step after next Jazzy sync.
-RUN apt update \
-    && sudo apt install curl -y \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2-testing/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
 RUN apt-get update \
     &&  apt install -y ros-jazzy-rmw-zenoh-cpp \
     && rm -rf /var/lib/apt/lists/*
@@ -85,4 +79,3 @@ ENV MODEL_DIR=/opt/ros/underlay/install/models
 
 CMD exec /opt/ros/overlay/install/lib/${SERVICE_PACKAGE}/${SERVICE_EXECUTABLE_NAME} \
     --ros-args -p model_dir:=${MODEL_DIR}
-    
