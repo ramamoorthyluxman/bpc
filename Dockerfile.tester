@@ -22,12 +22,6 @@ RUN . /opt/ros/jazzy/setup.sh \
 
 FROM underlay AS overlay
 
-# TODO(Yadunund): Remove this step after next Jazzy sync.
-RUN apt update \
-    && sudo apt install curl -y \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2-testing/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
 RUN apt-get update \
     &&  apt install -y ros-jazzy-rmw-zenoh-cpp \
     && rm -rf /var/lib/apt/lists/*
@@ -48,6 +42,8 @@ RUN . /opt/ros/jazzy/setup.sh \
 FROM base
 
 ARG DATASET_NAME
+ARG OUTPUT_DIR=/submission
+ARG OUTPUT_FILENAME=submission.csv
 ARG SERVICE_PACKAGE=ibpc_tester
 ARG SERVICE_EXECUTABLE_NAME=ibpc_tester
 ARG SPLIT_TYPE=val
@@ -58,7 +54,7 @@ RUN apt update \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2-testing/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
 RUN apt-get update \
-    &&  apt install -y ros-jazzy-rmw-zenoh-cpp python3-imageio python3-png python3-pip python3-scipy \
+    &&  apt install -y ros-jazzy-rmw-zenoh-cpp python3-imageio python3-pandas python3-png python3-pip python3-scipy \
     && rm -rf /var/lib/apt/lists/*
 
 # TODO remove deprecated pytz usage
@@ -72,9 +68,11 @@ RUN sed --in-place \
     /ros_entrypoint.sh
 
 ENV DATASET_NAME=${DATASET_NAME}
+ENV OUTPUT_DIR=${OUTPUT_DIR}
+ENV OUTPUT_FILENAME=${OUTPUT_FILENAME}
 ENV SERVICE_PACKAGE=${SERVICE_PACKAGE}
 ENV SERVICE_EXECUTABLE_NAME=${SERVICE_EXECUTABLE_NAME}
 ENV SPLIT_TYPE=${SPLIT_TYPE}
 
 CMD exec /opt/ros/overlay/install/lib/${SERVICE_PACKAGE}/${SERVICE_EXECUTABLE_NAME} \
-    --ros-args -p dataset_name:=${DATASET_NAME} -p split_type:=${SPLIT_TYPE}
+    --ros-args -p dataset_name:=${DATASET_NAME} -p split_type:=${SPLIT_TYPE} -p output_dir:=${OUTPUT_DIR} -p output_filename:=${OUTPUT_FILENAME}

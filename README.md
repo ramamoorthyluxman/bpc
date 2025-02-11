@@ -1,7 +1,7 @@
 # Perception Challenge For Bin-Picking
 
-[![build](https://github.com/Yadunund/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/Yadunund/bpc/actions/workflows/build.yaml)
-[![style](https://github.com/Yadunund/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/Yadunund/bpc/actions/workflows/style.yaml)
+[![build](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
+[![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
 
 For more details on the challenge, [click here](https://bpc.opencv.org/).
 
@@ -20,7 +20,7 @@ This repository contains the ROS interfaces, sample submission code and evaluati
 - **ROS Interface:**
   The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
-In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
 ## Design
 
@@ -62,7 +62,7 @@ Participants are expected to modify the estimator code to implement their soluti
 ```bash
 mkdir -p ~/ws_bpc/src
 cd ~/ws_bpc/src
-git clone https://github.com/Yadunund/bpc.git
+git clone https://github.com/opencv/bpc.git
 ```
 
 ## Build
@@ -91,7 +91,7 @@ docker buildx build -t ibpc:tester \
 ### Start the Zenoh router
 
 ```bash
-docker run --init --rm --net host eclipse/zenoh:1.1.1 --no-multicast-scouting
+docker run --init --rm --net host eclipse/zenoh:1.2.1 --no-multicast-scouting
 ```
 
 ### Run the pose estimator
@@ -102,15 +102,15 @@ rocker --nvidia --cuda run --network=host ibpc:pose_estimator
 
 ### Run the tester
 
-> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset.
+> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset. Similarly, substitute <PATH_TO_OUTPUT_DIR> with the directory that should contain the results from the pose estimator. By default, the results will be saved as a `submission.csv` file but this filename can be updated by setting the `OUTPUT_FILENAME` environment variable.
 
 ```bash
-docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -it ibpc:tester
+docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it ibpc:tester
 ```
 
 ## Baseline Solution
 
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/Yadunund/bpc/tree/baseline_solution) branch and follow the instructions there.
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
 
 ## Next Steps
 
