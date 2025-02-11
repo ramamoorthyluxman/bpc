@@ -189,7 +189,7 @@ def main(argv=sys.argv):
         output_filepath = (output_dir / output_filename).resolve()
     except Exception as e:
         print(f"Error creating filepath: {e}")
-        output_filepath = filename
+        output_filepath = output_filename
     node.get_logger().info(f"Submission results will be written to {output_filepath}.")
 
     debug_cam_1 = None
