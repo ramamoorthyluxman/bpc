@@ -1,7 +1,7 @@
 # Perception Challenge For Bin-Picking
 
-[![build](https://github.com/Yadunund/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/Yadunund/bpc/actions/workflows/build.yaml)
-[![style](https://github.com/Yadunund/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/Yadunund/bpc/actions/workflows/style.yaml)
+[![build](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
+[![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
 
 For more details on the challenge, [click here](https://bpc.opencv.org/).
 
@@ -20,7 +20,7 @@ This repository contains the ROS interfaces, sample submission code and evaluati
 - **ROS Interface:**
   The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
-In addition, we provide the [ibpc_py tool](https://github.com/Yadunund/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
 
 ## Design
 
@@ -62,7 +62,7 @@ Participants are expected to modify the estimator code to implement their soluti
 ```bash
 mkdir -p ~/ws_bpc/src
 cd ~/ws_bpc/src
-git clone https://github.com/Yadunund/bpc.git
+git clone https://github.com/opencv/bpc.git
 ```
 
 ## Build
@@ -110,7 +110,7 @@ docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLI
 
 ## Baseline Solution
 
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/Yadunund/bpc/tree/baseline_solution) branch and follow the instructions there.
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
 
 ## Next Steps
 
