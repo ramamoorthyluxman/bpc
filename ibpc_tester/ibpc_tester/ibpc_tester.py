@@ -141,17 +141,19 @@ class BOPCamera:
 
 def pose_msg_to_rt(pose_msg):
     # Convert quaternion to rotation matrix
-    r = Rotation.from_quat([
-        pose_msg.orientation.x,
-        pose_msg.orientation.y,
-        pose_msg.orientation.z,
-        pose_msg.orientation.w
-    ])
+    r = Rotation.from_quat(
+        [
+            pose_msg.orientation.x,
+            pose_msg.orientation.y,
+            pose_msg.orientation.z,
+            pose_msg.orientation.w,
+        ]
+    )
     R = r.as_matrix().flatten().tolist()
-    
+
     # Get translation
     t = [pose_msg.position.x, pose_msg.position.y, pose_msg.position.z]
-    
+
     return R, t
 
 
@@ -231,21 +233,23 @@ def main(argv=sys.argv):
             )
             future = client.call_async(request)
             rclpy.spin_until_future_complete(node, future)
-            
+
             if future.result() is not None:
                 node.get_logger().info(f"Got results: {future.result().pose_estimates}")
                 # Process results and add to results list
                 for pose_estimate in future.result().pose_estimates:
                     R, t = pose_msg_to_rt(pose_estimate.pose)
-                    results.append({
-                        'scene_id': scene_id,
-                        'im_id': img_id,
-                        'obj_id': pose_estimate.obj_id,
-                        'score': pose_estimate.score,
-                        'R': R,
-                        't': t,
-                        'time': -1
-                    })
+                    results.append(
+                        {
+                            "scene_id": scene_id,
+                            "im_id": img_id,
+                            "obj_id": pose_estimate.obj_id,
+                            "score": pose_estimate.score,
+                            "R": R,
+                            "t": t,
+                            "time": -1,
+                        }
+                    )
             else:
                 node.get_logger().error(
                     "Exception while calling service: %r" % future.exception()
@@ -253,7 +257,7 @@ def main(argv=sys.argv):
 
     # Convert results to DataFrame and save
     df = pd.DataFrame(results)
-    df.to_csv('submission.csv', index=False)
+    df.to_csv("submission.csv", index=False)
     node.get_logger().info("Results saved to submission.csv")
 
     node.destroy_node()
