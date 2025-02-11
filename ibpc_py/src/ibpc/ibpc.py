@@ -166,7 +166,6 @@ def main():
         print("Fetch complete")
         return
 
-
     tester_args = {
         "network": "host",
         "extension_blacklist": {},
@@ -177,9 +176,10 @@ def main():
         ],
         "console_output_file": "ibpc_test_output.log",
         "volume": [
-            [f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets",
-             f"{args_dict['result_directory']}:/submission",
-             ]
+            [
+                f"{args_dict['dataset_directory']}:/opt/ros/underlay/install/datasets",
+                f"{args_dict['result_directory']}:/submission",
+            ]
         ],
     }
     print("Buiding tester env")
@@ -223,14 +223,13 @@ def main():
     tester_thread.start()
 
     args_dict["network"] = "host"
-    args_dict["extension_blacklist"] = {},
+    args_dict["extension_blacklist"] = ({},)
 
     # Confirm dataset directory is absolute
     args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
 
     active_extensions = extension_manager.get_active_extensions(args_dict)
     print("Active extensions %s" % [e.get_name() for e in active_extensions])
-
 
     dig = DockerImageGenerator(
         active_extensions, args_dict, args_dict["estimator_image"]
