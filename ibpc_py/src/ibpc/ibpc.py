@@ -75,7 +75,10 @@ ipd_core = {
 
 ipd_files = {
     "ipd_test_all.zip": "e1b042f046d7d07f8c8811f7739fb68a25ad8958d1b58c5cbc925f98096eb6f9",
-    "ipd_train_pbr.zip": "6afde1861ce781adc33fcdb3c91335fa39c5e7208a0b20433deb21f92f3e9a94",
+    "ipd_train_pbr.zip": "748bb427947b2df9f0341604503cce6924f4c1519bf915b387b8d0f565c59d92",
+    "ipd_train_pbr.z01": "b093dc28974f211f44dd2b9494f47533ef803c2ff3f9ef5605e8daa42b06227c",
+    "ipd_train_pbr.z02": "fabf83c142f2c8d63dc07a23110faf9650febb96eba16c706d5c3156b388666c",
+    "ipd_train_pbr.z03": "ae9c294e3ec09a13c27c5371d8eedd32d09ad51a541a953178b63eed38803034",
     "ipd_test_all.z01": "25ce71feb7d9811db51772e44ebc981d57d9f10c91776707955ab1e616346cb3",
 }
 ipd_files.update(ipd_core)
@@ -132,8 +135,9 @@ def fetch_dataset(dataset, output_path):
 
     for filename in fetched_files:
         # Append shard if found
-        if filename.endswith("01"):
+        if filename[-1].isdigit() and filename[-2].isdigit() and filename[-3] == "z":
             # Let 7z find the other files zipfile can't handle file sharding "multiple disks"
+            # With .zXX where XX is a number
             fetched_files.remove(filename)
 
             # Logic for combining files
