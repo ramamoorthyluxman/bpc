@@ -49,15 +49,96 @@ To simplify the evaluation process, Dockerfiles are provided to generate contain
 
 Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. More detailed submission instructions will be provided soon.
 
-## Requirements
+
+## Validation Setup
+
+### Requirements
 
 - [Docker](https://docs.docker.com/)
-- [rocker](https://github.com/osrf/rocker)
+ * Docker installed with their user in docker group for passwordless invocations.
+- 7z -- `apt install 7zip`
+- Python3 with virtualenv  -- `apt install python3-virtualenv`
 
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
-## Setup
 
+This section will guide you through validating your image.
+
+#### Setup a workspace
+```
+mkdir -p ~/bpc_ws
+```
+
+#### Create a virtual environment 
+
+📄 If you're already working in some form of virtualenv you can continue to use that and install `bpc` in that instead of making a new one. 
+
+```
+python3 -m venv ~/bpc_ws/bpc_env
+```
+
+#### Activate that virtual env
+
+```
+source ~/bpc_ws/bpc_env/bin/activate
+```
+
+**For any new shell interacting with the `bpc` command you will have to rerun this source command.**
+
+#### Install bpc 
+```
+pip install ibpc
+```
+
+
+
+### Fetch the dataset
+
+```
+cd ~/bpc_ws
+bpc fetch ipd
+```
+
+### Run the test
+
+The test will validate your provided image against the test dataset.
+When you build a new image you rerun this test.
+
+**At the moment the published tester is not available.
+You will have to build it locally see below in Development to build `ibpc:tester` and pass `--tester-image ibpc:tester` as additional arguments.
+The default is `ghcr.io/opencv/bpc/estimator-tester:latest` but that's currently unavailable.
+
+```
+bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
+```
+
+For example:
+
+```
+bpc test ghcr.io/opencv/bpc/estimator-example:latest ipd
+```
+**Substitute your own estimator image for ghcr.io/opencv/bpc/estimator-example:latest it's not currently available.**
+If you follow the development build below the argument is `ibpc:pose_estimator`.
+
+The console output will show the system getting started and then the output of the estimator. 
+
+If you would like to interact with the estimator and run alternative commands or anything else in the container you can invoke it with `--debug`
+
+The tester console output will be streamed to the file `ibpc_test_output.log` Use this to see it
+
+```
+tail -f ibpc_test_output.log
+```
+
+The results will come out as `submission.csv` when the tester is complete.
+
+
+## Pose Estimator Development
+
+Above you've learned how to validate a system. 
+It's time to learn how to create your own Pose Estimator.
+
+### Fetch the source repository
 
 ```bash
 mkdir -p ~/ws_bpc/src
@@ -65,28 +146,86 @@ cd ~/ws_bpc/src
 git clone https://github.com/opencv/bpc.git
 ```
 
-## Build
-
 ### Build the ibpc_pose_estimator
+
+We will use the following example pose estimator for the demo. 
 
 ```bash
 cd ~/ws_bpc/src/bpc
-docker buildx build -t ibpc:pose_estimator \
+docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
     .
 ```
 
+If you use this tag the `bpc` invocation will be as follows where you use the image you just built:
+
+`bpc test bpc_pose_estimator:example ipd`
+
+
+👷 At this point it is up to you to fork and fill in the implementation of the pose estimator. 👷
+
+### Tips
+
+🐌 **If you are iterating a lot of times with the validation and are frustrated by how long the cuda installation is, you can add it to your Dockerfile as below.**
+It will make the image significantly larger, but faster to iterate if you put it higher in the dockerfile. We can't include it in the published image because the image gets too big for hosting and pulling easily.
+
+```
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget software-properties-common gnupg2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN \
+  wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+  dpkg -i cuda-keyring_1.1-1_all.deb && \
+  rm cuda-keyring_1.1-1_all.deb && \
+  \
+  apt-get update && \
+  apt-get -y install cuda-toolkit && \
+  rm -rf /var/lib/apt/lists/*
+```
+
+### Baseline Solution
+
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
+
+
+## Further Details
+
+The above is enough to get you going.
+However we want to be open about what else were doing.
+You can see the source of the tester and build your own version as follows if you'd like. 
+
 ### Build the ibpc_tester
+
+If you want to reproduce the tester image run the following command
+
+
+This is packaged and built via a github action to `ghcr.io/opencv/bpc/estimator-tester:latest` however this is how to reproduce it. 
 
 ```bash
 cd ~/ws_bpc/src/bpc
-docker buildx build -t ibpc:tester \
+docker buildx build -t bpc_tester:latest \
     --file ./Dockerfile.tester \
     .
 ```
 
-## Run
+And then when you invoke `bpc test` append the argument `--tester-image bpc_tester:latest` to use your local build.
+
+### If you would like the training data
+
+Use the command:
+```
+bpc fetch ipd_all
+```
+
+
+### Manually Run components 
+
+It is possible to manually run the components.
+`bpc` shows what it is running on the console output.
+Or you can run as outlined below. 
+
 
 ### Start the Zenoh router
 
@@ -108,10 +247,3 @@ rocker --nvidia --cuda --network=host ibpc:pose_estimator
 docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it ibpc:tester
 ```
 
-## Baseline Solution
-
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
-
-## Next Steps
-
-Stay tuned – more detailed submission instructions and guidelines will be provided soon.
