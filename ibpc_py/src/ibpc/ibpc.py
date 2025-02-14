@@ -1,8 +1,10 @@
 import argparse
 import hashlib
 import os
+import pathlib
 import shlex
 import shutil
+import signal
 import threading
 import subprocess
 
@@ -19,6 +21,11 @@ import urllib.request
 from zipfile import ZipFile
 from contextlib import nullcontext
 
+ESTIMATOR_CONTAINER = "bpc_estimator"
+TESTER_CONTAINER = "bpc_tester"
+ZENOH_CONTAINER = "bpc_zenoh"
+DEFAULT_CONTAINER_NAMES = [ESTIMATOR_CONTAINER, ZENOH_CONTAINER, TESTER_CONTAINER]
+
 
 def get_bop_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/datasets/resolve/main/{modelname}/"
@@ -26,6 +33,22 @@ def get_bop_template(modelname):
 
 def get_ipd_template(modelname):
     return f"https://huggingface.co/datasets/bop-benchmark/{modelname}/resolve/main/"
+
+
+def stop_containers(containers=DEFAULT_CONTAINER_NAMES, quiet=False):
+    for container_name in containers:
+        cmd = ["docker", "kill", container_name]
+        if not quiet:
+            print(f"Running cmd {cmd}")
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0 and not quiet:
+            print(
+                f"Failed to stop container {container_name}. "
+                f"{r.stdout}"
+                f"{r.stderr}"
+            )
+        elif not quiet:
+            print(f"Successfully stopped container {container_name}")
 
 
 bop_suffixes = [
@@ -46,18 +69,26 @@ lm_files = {
     "lm_train_pbr.zip": "b7814cc0cd8b6f0d9dddff7b3ded2a189eacfd2c19fa10b3e332f022930551a9",
 }
 
-ipd_files = {
+ipd_core = {
     "ipd_base.zip": "c4943d90040df0737ac617c30a9b4e451a7fc94d96c03406376ce34e5a9724d1",
     "ipd_models.zip": "e7435057b48c66faf3a10353a7ae0bffd63ec6351a422d2c97d4ca4b7e6b797a",
-    "ipd_test_all.zip": "e1b042f046d7d07f8c8811f7739fb68a25ad8958d1b58c5cbc925f98096eb6f9",
-    "ipd_train_pbr.zip": "6afde1861ce781adc33fcdb3c91335fa39c5e7208a0b20433deb21f92f3e9a94",
     "ipd_val.zip": "50df37c370557a3cccc11b2e6d5f37f13783159ed29f4886e09c9703c1cad8de",
-    "ipd_test_all.z01": "25ce71feb7d9811db51772e44ebc981d57d9f10c91776707955ab1e616346cb3",
 }
 
+ipd_files = {
+    "ipd_test_all.zip": "e1b042f046d7d07f8c8811f7739fb68a25ad8958d1b58c5cbc925f98096eb6f9",
+    "ipd_train_pbr.zip": "748bb427947b2df9f0341604503cce6924f4c1519bf915b387b8d0f565c59d92",
+    "ipd_train_pbr.z01": "b093dc28974f211f44dd2b9494f47533ef803c2ff3f9ef5605e8daa42b06227c",
+    "ipd_train_pbr.z02": "fabf83c142f2c8d63dc07a23110faf9650febb96eba16c706d5c3156b388666c",
+    "ipd_train_pbr.z03": "ae9c294e3ec09a13c27c5371d8eedd32d09ad51a541a953178b63eed38803034",
+    "ipd_test_all.z01": "25ce71feb7d9811db51772e44ebc981d57d9f10c91776707955ab1e616346cb3",
+}
+ipd_files.update(ipd_core)
+
 available_datasets = {
-    "ipd": (get_ipd_template("ipd"), ipd_files),
-    "lm": (get_bop_template("lm"), lm_files),
+    "ipd_all": (get_ipd_template("ipd"), ipd_files),
+    "ipd": (get_ipd_template("ipd"), ipd_core),
+    # "lm": (get_bop_template("lm"), lm_files), #LM doesn't work for bpc so disabling
 }
 
 
@@ -73,8 +104,11 @@ def sha256_file(filename):
     return sha256.hexdigest()
 
 
-def fetch_dataset(dataset, output_path):
+def fetch_dataset(dataset, output_path, remove_zip_after_extract):
     (url_base, files) = available_datasets[dataset]
+    # Before we do anything make sure the directory exists
+    dataset_dir = os.path.join(output_path, dataset)
+    os.makedirs(dataset_dir, exist_ok=True)
     fetched_files = []
     for suffix in files.keys():
 
@@ -103,8 +137,9 @@ def fetch_dataset(dataset, output_path):
 
     for filename in fetched_files:
         # Append shard if found
-        if filename.endswith("01"):
+        if filename[-1].isdigit() and filename[-2].isdigit() and filename[-3] == "z":
             # Let 7z find the other files zipfile can't handle file sharding "multiple disks"
+            # With .zXX where XX is a number
             fetched_files.remove(filename)
 
             # Logic for combining files
@@ -123,9 +158,17 @@ def fetch_dataset(dataset, output_path):
 
     for filename in fetched_files:
         print(f"Unzipping {filename}")
-        subprocess.check_call(["7z", "x", "-y", filename, f"-o{output_path}"])
+        extraction_path = dataset_dir
+        # BOP Specialization
+        if filename.endswith("base.zip"):
+            extraction_path = output_path
+        subprocess.check_call(["7z", "x", "-y", filename, f"-o{extraction_path}"])
         # with ZipFile(filename) as zfile:
         #    zfile.extractall(output_path)
+
+    if remove_zip_after_extract:
+        for filename in fetched_files:
+            pathlib.Path(filename).unlink(missing_ok=True)
 
 
 def main():
@@ -141,38 +184,49 @@ def main():
     sub_parsers = main_parser.add_subparsers(title="test", dest="subparser_name")
     test_parser = sub_parsers.add_parser("test")
 
-    test_parser.add_argument("estimator_image")
-    test_parser.add_argument("dataset")
+    test_parser.add_argument(
+        "estimator_image",
+        help="For example ghcr.io/opencv/bpc/bpc_pose_estimator:example or your own build",
+    )
+    test_parser.add_argument("dataset", choices=available_datasets.keys())
     test_parser.add_argument("--dataset_directory", action="store", default=".")
     test_parser.add_argument("--result_directory", action="store", default=".")
     test_parser.add_argument("--debug-inside", action="store_true")
     test_parser.add_argument(
-        "--tester-image", default="ghcr.io/opencv/bpc/estimator-tester:latest"
+        "--tester-image", default="ghcr.io/opencv/bpc/bpc_tester:latest"
     )
 
     fetch_parser = sub_parsers.add_parser("fetch")
     fetch_parser.add_argument("dataset", choices=available_datasets.keys())
     fetch_parser.add_argument("--dataset-path", default=".")
+    fetch_parser.add_argument(
+        "--remove-zip-after-extract",
+        default=False,
+        action="store_true",
+        help="Remove the zip files after extracting to save disk space.",
+    )
 
     extension_manager = RockerExtensionManager()
-    default_args = {"cuda": True, "network": "host"}
-    # extension_manager.extend_cli_parser(test_parser, default_args)
 
     args = main_parser.parse_args()
     args_dict = vars(args)
     if args.subparser_name == "fetch":
-        print(f"Fetching dataset {args_dict['dataset']} to {args_dict['dataset_path']}")
-        fetch_dataset(args_dict["dataset"], args_dict["dataset_path"])
+        dataset_name = args_dict["dataset"]
+        dataset_directory = args_dict["dataset_path"]
+        print(f"Fetching dataset {dataset_name} to {dataset_directory}")
+        fetch_dataset(
+            dataset_name, dataset_directory, args_dict["remove_zip_after_extract"]
+        )
         print("Fetch complete")
         return
 
     tester_args = {
-        "name": "bpc_tester",
+        "name": TESTER_CONTAINER,
         "network": "host",
         "extension_blacklist": {},
         "operating_mode": OPERATIONS_NON_INTERACTIVE,
         "env": [
-            [f"BOP_PATH=/opt/ros/underlay/install/datasets/{args_dict['dataset']}"],
+            [f"BOP_PATH=/opt/ros/underlay/install/datasets/"],
             [f"DATASET_NAME={args_dict['dataset']}"],
         ],
         "console_output_file": "ibpc_test_output.log",
@@ -195,7 +249,7 @@ def main():
         return exit_code
 
     zenoh_args = {
-        "name": "bpc_zenoh",
+        "name": ZENOH_CONTAINER,
         "network": "host",
         "extension_blacklist": {},
         "console_output_file": "ibpc_zenoh_output.log",
@@ -213,20 +267,13 @@ def main():
         print("Build of zenoh failed exiting")
         return exit_code
 
-    def run_instance(dig_instance, args):
-        dig_instance.run(**args)
+    print("Making sure that containers are not left over from previous runs.    ")
+    stop_containers(quiet=True)
 
-    zenoh_thread = threading.Thread(target=run_instance, args=(dig_zenoh, zenoh_args))
-    zenoh_thread.start()
-
-    tester_thread = threading.Thread(
-        target=run_instance, args=(dig_tester, tester_args)
-    )
-    tester_thread.start()
-
-    args_dict["name"] = "bpc_estimator"
+    args_dict["name"] = ESTIMATOR_CONTAINER
     args_dict["network"] = "host"
     args_dict["extension_blacklist"] = ({},)
+    args_dict["cuda"] = True
 
     # Confirm dataset directory is absolute
     args_dict["dataset_directory"] = os.path.abspath(args_dict["dataset_directory"])
@@ -247,17 +294,35 @@ def main():
         args_dict["command"] = "/bin/bash"
         args_dict["mode"] = OPERATIONS_INTERACTIVE
 
+    def run_instance(dig_instance, args, other_instances):
+        result = dig_instance.run(**args)
+        name = args["name"]
+        print(f"{ name } finished with exit code {result} -- stopping others.")
+        stop_containers(other_instances, quiet=True)
+
+    zenoh_thread = threading.Thread(
+        target=run_instance,
+        args=(dig_zenoh, zenoh_args, [TESTER_CONTAINER, ESTIMATOR_CONTAINER]),
+    )
+    zenoh_thread.start()
+
+    tester_thread = threading.Thread(
+        target=run_instance,
+        args=(dig_tester, tester_args, [ZENOH_CONTAINER, ESTIMATOR_CONTAINER]),
+    )
+    tester_thread.start()
+
     try:
         result = dig.run(**args_dict)
+        print(f"Estimator finished with exit code {result}")
+        stop_containers(quiet=True)
         return result
 
     except KeyboardInterrupt:
         # TODO clean up threads here
 
-        for container_name in ["bpc_estimator", "bpc_zenoh", "bpc_tester"]:
-            cmd = ["docker", "kill", container_name]
-            print(f"Running cmd {cmd}")
-            subprocess.call(cmd)
+        print("Stopping all containers.")
+        stop_containers()
         tester_thread.join()
         zenoh_thread.join()
 

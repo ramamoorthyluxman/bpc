@@ -1,7 +1,8 @@
 # Perception Challenge For Bin-Picking
 
-[![build](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
+[![build_packages](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
 [![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
+[![test validation](https://github.com/opencv/bpc/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/test.yaml)
 
 For more details on the challenge, [click here](https://bpc.opencv.org/).
 
@@ -12,7 +13,7 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 This repository contains the ROS interfaces, sample submission code and evaluation service for the Perception Challenge For Bin-Picking.
 
 - **Estimator:**
-  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py` (or its C++ counterpart). The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
+  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py`. The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
 
 - **Tester:**
   The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only. It loads the test dataset, prepares image inputs, invokes the estimator service repeatedly, collects the results, and submits for further evaluation.
@@ -32,7 +33,7 @@ The core architecture of the challenge is based on ROS 2. Participants are requi
   The ROS service interface (defined in the [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv) file) acts as the API for the challenge.
 
 - **PoseEstimatorNode:**
-  Participants are provided with C++ and Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available [ROS 2 client libraries](https://docs.ros.org/en/jazzy/Concepts/Basic/About-Client-Libraries.html#client-libraries) including C++, Python, Rust, Node.js, or C#. Please use [ROS 2 Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html).
+  Participants are provided with Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available [ROS 2 client libraries](https://docs.ros.org/en/jazzy/Concepts/Basic/About-Client-Libraries.html#client-libraries) including C++, Python, Rust, Node.js, or C#. Please use [ROS 2 Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html).
 
 - **TesterNode:**
   A fully implemented TesterNode is provided that:
@@ -49,23 +50,71 @@ To simplify the evaluation process, Dockerfiles are provided to generate contain
 
 Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. More detailed submission instructions will be provided soon.
 
-## Requirements
+## Validation Setup
+
+### Requirements
 
 - [Docker](https://docs.docker.com/)
-- [rocker](https://github.com/osrf/rocker)
+ * Docker installed with their user in docker group for passwordless invocations.
+- 7z -- `apt install 7zip`
+- Python3 with virtualenv  -- `apt install python3-virtualenv`
 
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
-## Setup
 
+This section will guide you through validating your image.
+
+#### Setup a workspace
+```
+mkdir -p ~/bpc_ws
+```
+
+#### Create a virtual environment 
+
+📄 If you're already working in some form of virtualenv you can continue to use that and install `bpc` in that instead of making a new one. 
+
+```
+python3 -m venv ~/bpc_ws/bpc_env
+```
+
+#### Activate that virtual env
+
+```
+source ~/bpc_ws/bpc_env/bin/activate
+```
+
+**For any new shell interacting with the `bpc` command you will have to rerun this source command.**
+
+#### Install bpc 
+
+Install the bpc command from the ibpc pypi package. (bpc was already taken :-( )
+
+```
+pip install ibpc
+```
+
+### Fetch the source repository
 
 ```bash
-mkdir -p ~/ws_bpc/src
-cd ~/ws_bpc/src
+cd ~/bpc_ws
 git clone https://github.com/opencv/bpc.git
 ```
 
-## Build
+### Fetch the dataset
+
+```
+cd ~/bpc_ws
+bpc fetch ipd
+```
+### Build the bpc_tester image
+
+```bash
+cd ~/bpc_ws
+docker buildx build -t bpc_tester:latest \
+    --file ./Dockerfile.tester \
+    .
+```
+
 ### Setting up the baseline solution
 ```bash
 ### Pull Baseline Solution Code ###
@@ -78,45 +127,107 @@ git clone https://github.com/CIRP-Lab/bpc_baseline
 
 ### Build the ibpc_pose_estimator
 
+We will use the following example pose estimator for the demo. 
+
 ```bash
-cd ~/ws_bpc/src/bpc
-docker buildx build -t ibpc:pose_estimator \
+cd ~/bpc_ws
+docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
     .
 ```
 
-### Build the ibpc_tester
+If you use this tag the `bpc` invocation will be as follows where you use the image you just built:
 
-```bash
-cd ~/ws_bpc/src/bpc
-docker buildx build -t ibpc:tester \
-    --file ./Dockerfile.tester \
-    .
+`bpc test bpc_pose_estimator:example ipd`
+
+
+### Run the test
+
+The test will validate your pose_estimator image against the local copy of validation or test dataset.
+When you build a new image you rerun this test.
+
+```
+bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
 ```
 
-## Run
+The console output will show the system getting started and then the output of the estimator. 
 
-### Start the Zenoh router
+If you would like to interact with the estimator and run alternative commands or anything else in the container you can invoke it with `--debug`
+
+The tester console output will be streamed to the file `ibpc_test_output.log` Use this to see it
+
+```
+tail -f ibpc_test_output.log
+```
+
+The results will come out as `submission.csv` when the tester is complete.
+
+
+
+### Tips
+
+🐌 **If you are iterating a lot of times with the validation and are frustrated by how long the cuda installation is, you can add it to your Dockerfile as below.**
+It will make the image significantly larger, but faster to iterate if you put it higher in the dockerfile. We can't include it in the published image because the image gets too big for hosting and pulling easily.
+
+```
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget software-properties-common gnupg2 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN \
+  wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+  dpkg -i cuda-keyring_1.1-1_all.deb && \
+  rm cuda-keyring_1.1-1_all.deb && \
+  \
+  apt-get update && \
+  apt-get -y install cuda-toolkit && \
+  rm -rf /var/lib/apt/lists/*
+```
+
+### Baseline Solution
+
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
+
+
+## Further Details
+
+The above is enough to get you going.
+However we want to be open about what else were doing.
+You can see the source of the tester and build your own version as follows if you'd like. 
+
+### If you would like the training data
+
+Use the command:
+```
+bpc fetch ipd_all
+```
+
+
+### Manually Run components 
+
+It is possible to manually run the components.
+`bpc` shows what it is running on the console output.
+Or you can run as outlined below. 
+
+
+#### Start the Zenoh router
 
 ```bash
 docker run --init --rm --net host eclipse/zenoh:1.2.1 --no-multicast-scouting
 ```
 
-### Run the pose estimator
+#### Run the pose estimator
 We use [rocker](https://github.com/osrf/rocker) to add GPU support to Docker containers. To install rocker, run `pip install rocker` on the host machine.
 ```bash
-rocker --nvidia --cuda --network=host ibpc:pose_estimator
+rocker --nvidia --cuda --network=host bpc_pose_estimator:example
 ```
 
-### Run the tester
+#### Run the tester
 
 > Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset. Similarly, substitute <PATH_TO_OUTPUT_DIR> with the directory that should contain the results from the pose estimator. By default, the results will be saved as a `submission.csv` file but this filename can be updated by setting the `OUTPUT_FILENAME` environment variable.
 
 ```bash
-docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it ibpc:tester
+docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it bpc_tester:latest
 ```
 
-## Next Steps
-
-Stay tuned – more detailed submission instructions and guidelines will be provided soon.
