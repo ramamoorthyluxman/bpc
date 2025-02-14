@@ -115,11 +115,11 @@ docker buildx build -t bpc_tester:latest \
     .
 ```
 
-### Setting up the baseline solution
+### Setup the baseline solution
 ```bash
 ### Pull Baseline Solution Code ###
 cd bpc/
-wget https://storage.googleapis.com/akasha-public/IPBC/baseline_solution/v1/models.zip
+wget https://storage.googleapis.com/akasha-public/IBPC/baseline_solution/v1/models.zip
 unzip models.zip
 rm models.zip
 git clone https://github.com/CIRP-Lab/bpc_baseline
