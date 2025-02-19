@@ -103,7 +103,7 @@ git clone https://github.com/opencv/bpc.git
 ### Fetch the dataset
 
 ```
-cd ~/bpc_ws
+cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
 ### Build the bpc_tester image
