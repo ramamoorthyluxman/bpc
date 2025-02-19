@@ -109,7 +109,7 @@ bpc fetch ipd
 ### Build the bpc_tester image
 
 ```bash
-cd ~/bpc_ws
+cd ~/bpc_ws/bpc
 docker buildx build -t bpc_tester:latest \
     --file ./Dockerfile.tester \
     .
