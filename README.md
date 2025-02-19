@@ -130,7 +130,7 @@ git clone https://github.com/CIRP-Lab/bpc_baseline
 We will use the following example pose estimator for the demo. 
 
 ```bash
-cd ~/bpc_ws
+cd ~/bpc_ws/bpc
 docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
