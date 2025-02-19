@@ -56,7 +56,7 @@ Participants are expected to modify the estimator code to implement their soluti
 
 - [Docker](https://docs.docker.com/)
  * Docker installed with their user in docker group for passwordless invocations.
-- 7z -- `apt install 7zip`
+- 7z -- `apt install 7zip p7zip-full`
 - Python3 with virtualenv  -- `apt install python3-virtualenv`
 
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
