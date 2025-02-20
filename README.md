@@ -10,7 +10,7 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 
 ## Overview
 
-This repository contains the ROS interfaces, sample submission code and evaluation service for the Perception Challenge For Bin-Picking.
+This repository contains the sample submission code, ROS interfaces, and evaluation service for the Perception Challenge For Bin-Picking. The reason we openly share the tester code here is to give participants a chance to validate their submissions before submitting.
 
 - **Estimator:**
   The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py`. The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
@@ -21,7 +21,7 @@ This repository contains the ROS interfaces, sample submission code and evaluati
 - **ROS Interface:**
   The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
 
-In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. Please refer to its README for further details.
+In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. You can find the installation guide and examples of its usage below. 
 
 ## Design
 
@@ -48,21 +48,19 @@ To simplify the evaluation process, Dockerfiles are provided to generate contain
 
 ## Submission Instructions
 
-Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. More detailed submission instructions will be provided soon.
+Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. You can find detailed submission instructions [here](https://bpc.opencv.org/web/challenges/challenge-page/1/submission). Please make sure to register a team to get access to the submission instructions. 
 
-## Validation Setup
+## Setting up
 
-### Requirements
+The following instructions will guide you through the process of validating your submission locally before official submission.
 
-- [Docker](https://docs.docker.com/)
- * Docker installed with their user in docker group for passwordless invocations.
-- 7z -- `apt install 7zip p7zip-full`
+#### Requirements
+
+- [Docker](https://docs.docker.com/) installed with the user in docker group for passwordless invocations.
+- 7z -- `apt install p7zip-full`
 - Python3 with virtualenv  -- `apt install python3-virtualenv`
 
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
-
-
-This section will guide you through validating your image.
 
 #### Setup a workspace
 ```
@@ -83,7 +81,7 @@ python3 -m venv ~/bpc_ws/bpc_env
 source ~/bpc_ws/bpc_env/bin/activate
 ```
 
-**For any new shell interacting with the `bpc` command you will have to rerun this source command.**
+For any new shell interacting with the `bpc` command you will have to rerun this source command.
 
 #### Install bpc 
 
@@ -93,53 +91,59 @@ Install the bpc command from the ibpc pypi package. (bpc was already taken :-( )
 pip install ibpc
 ```
 
-### Fetch the source repository
+#### Fetch the source repository
 
 ```bash
 cd ~/bpc_ws
 git clone https://github.com/opencv/bpc.git
 ```
 
-### Fetch the dataset
+#### Fetch the dataset
 
 ```
 cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
-### Build the bpc_tester image
+This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
 
-```bash
-cd ~/bpc_ws/bpc
-docker buildx build -t bpc_tester:latest \
-    --file ./Dockerfile.tester \
-    .
+#### Quickstart with prebuilt images
 ```
+bpc test ghcr.io/opencv/bpc/bpc_pose_estimator:example ipd
+```
+This will download the prebuilt zenoh, tester, and pose_estimator images and run containers based on them. The pose_estimator image contains an empty get_pose_estimates function. After the containers start, you should see the following in your terminal:
+```
+[INFO] [1740003838.048516355] [bpc_pose_estimator]: Starting bpc_pose_estimator...
+[INFO] [1740003838.049547292] [bpc_pose_estimator]: Model directory set to /opt/ros/underlay/install/models.
+[INFO] [1740003838.050190130] [bpc_pose_estimator]: Pose estimates can be queried over srv /get_pose_estimates.
+```
+#### Build custom bpc_pose_estimator image
 
-### Build the ibpc_pose_estimator
-
-We will use the following example pose estimator for the demo. 
+You can then build custom bpc_pose_estimator image with your updated get_pose_estimates function
 
 ```bash
 cd ~/bpc_ws/bpc
-docker buildx build -t bpc_pose_estimator:example \
+docker buildx build -t <POSE_ESTIMATOR_DOCKER_TAG> \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
     .
 ```
 
-If you use this tag the `bpc` invocation will be as follows where you use the image you just built:
+and run it with the following command
+```
+bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
+```
 
-`bpc test bpc_pose_estimator:example ipd`
-
-
-### Run the test
-
-The test will validate your pose_estimator image against the local copy of validation or test dataset.
+For example: 
+```
+cd ~/bpc_ws/bpc
+docker buildx build -t bpc_pose_estimator:example \
+    --file ./Dockerfile.estimator \
+    --build-arg="MODEL_DIR=models" \
+    .
+bpc test bpc_pose_estimator:example ipd
+```
+This will validate your pose_estimator image against the local copy of validation dataset.
 When you build a new image you rerun this test.
-
-```
-bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
-```
 
 The console output will show the system getting started and then the output of the estimator. 
 
@@ -153,6 +157,9 @@ tail -f ibpc_test_output.log
 
 The results will come out as `submission.csv` when the tester is complete.
 
+### Baseline Solution
+
+We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
 
 
 ### Tips
@@ -175,24 +182,18 @@ RUN \
   rm -rf /var/lib/apt/lists/*
 ```
 
-### Baseline Solution
-
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
-
-
 ## Further Details
 
 The above is enough to get you going.
 However we want to be open about what else were doing.
 You can see the source of the tester and build your own version as follows if you'd like. 
 
-### If you would like the training data
+### If you would like the training data and test data
 
 Use the command:
 ```
 bpc fetch ipd_all
 ```
-
 
 ### Manually Run components 
 
@@ -221,3 +222,15 @@ rocker --nvidia --cuda --network=host bpc_pose_estimator:example
 docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it bpc_tester:latest
 ```
 
+### Build the bpc_tester image
+Generally not required, but to build the tester image, run the following command:
+```bash
+cd ~/bpc_ws/bpc
+docker buildx build -t bpc_tester:latest \
+    --file ./Dockerfile.tester \
+    .
+```
+You can then use your tester image with the bpc tool, as shown in the example below:
+```
+bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
+```
