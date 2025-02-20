@@ -121,34 +121,53 @@ git clone https://github.com/CIRP-Lab/bpc_baseline
 
 #### Build custom bpc_pose_estimator image
 
-You can then build custom bpc_pose_estimator image with your updated get_pose_estimates function
-
-```bash
-cd ~/bpc_ws/bpc
-docker buildx build -t <POSE_ESTIMATOR_DOCKER_TAG> \
-    --file ./Dockerfile.estimator \
-    --build-arg="MODEL_DIR=models" \
-    .
-```
-
-and run it with the following command
-```bash
-bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
-```
-
-For example: 
 ```bash
 cd ~/bpc_ws/bpc
 docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
     --build-arg="MODEL_DIR=models" \
     .
+```
+
+#### Run evaluation
+```bash
 bpc test bpc_pose_estimator:example ipd
 ```
-This will validate your pose_estimator image against the local copy of validation dataset.
-When you build a new image you rerun this test.
+This will validate the baseline solution pose_estimator image against the local copy of validation dataset.
 
-The console output will show the system getting started and then the output of the estimator. 
+The console output will show the system getting started and then the output of the estimator. It should look like this
+```
+[INFO] [1740012020.730088360] [bpc_pose_estimator]: Starting bpc_pose_estimator...
+[INFO] [1740012020.731203942] [bpc_pose_estimator]: Model directory set to /opt/ros/underlay/install/models.
+[INFO] [1740012020.731942445] [bpc_pose_estimator]: Pose estimates can be queried over srv /get_pose_estimates.
+None
+(2160, 3840, 3)
+
+0: 736x1280 7 object_18s, 128.3ms
+Speed: 24.6ms preprocess, 128.3ms inference, 133.0ms postprocess per image at shape (1, 3, 736, 1280)
+(2160, 3840, 3)
+
+0: 736x1280 3 object_18s, 9.3ms
+Speed: 10.5ms preprocess, 9.3ms inference, 1.2ms postprocess per image at shape (1, 3, 736, 1280)
+(2160, 3840, 3)
+
+0: 736x1280 1 object_18, 8.4ms
+Speed: 6.2ms preprocess, 8.4ms inference, 1.2ms postprocess per image at shape (1, 3, 736, 1280)
+
+--- Cost Matrix Stats ---
+Shape: (7, 3, 1)
+Min: 28.0149, Max: 1364.5308, Mean: 623.8398
+
+Random samples from cost_matrix:
+  cost_matrix[6,1,0] = 173.7403
+  cost_matrix[2,1,0] = 248.1156
+  cost_matrix[2,1,0] = 248.1156
+  cost_matrix[4,1,0] = 485.7614
+  cost_matrix[5,2,0] = 417.8684
+[    -3.5334   -0.013345    -0.35796  -0.0013325  -0.0078956]
+[    -4.0632    0.034532    -0.13855    0.003017  -0.0088243]
+[    -3.8296    0.063605      1.0484  -0.0020436  -0.0054983]
+```
 
 If you would like to interact with the estimator and run alternative commands or anything else in the container you can invoke it with `--debug`
 
@@ -156,6 +175,28 @@ The tester console output will be streamed to the file `ibpc_test_output.log` Us
 
 ```bash
 tail -f ibpc_test_output.log
+```
+
+The output should look like this
+```
+[INFO] [1740012109.842616985] [ibpc_tester_node]: Sending request for scene_id 0 img_id 5 for objects array('Q', [18])
+[INFO] [1740012112.885330028] [ibpc_tester_node]: Got results: [ibpc_interfaces.msg.PoseEstimate(obj_id=18, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=-416.64837223125244, y=-26.094635255734246, z=1827.382175127359), orientation=geometry_msgs.msg.Quaternion(x=-0.49402383118887866, y=0.8107506610377319, z=0.2913778253987405, w=-0.11714428159429767)))]
+[INFO] [1740012114.688732707] [ibpc_tester_node]: Sending request for scene_id 0 img_id 4 for objects array('Q', [18])
+[INFO] [1740012115.749648564] [ibpc_tester_node]: Got results: []
+[INFO] [1740012117.618597512] [ibpc_tester_node]: Sending request for scene_id 0 img_id 3 for objects array('Q', [18])
+[INFO] [1740012118.372530877] [ibpc_tester_node]: Got results: []
+[INFO] [1740012120.165323263] [ibpc_tester_node]: Sending request for scene_id 0 img_id 2 for objects array('Q', [18])
+[INFO] [1740012120.960678267] [ibpc_tester_node]: Got results: [ibpc_interfaces.msg.PoseEstimate(obj_id=18, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=57.24788827455574, y=115.56284164988212, z=1743.2343994553567), orientation=geometry_msgs.msg.Quaternion(x=-0.5231791402158902, y=0.6201425354634018, z=-0.4540152155956859, w=0.36820783120350425)))]
+[INFO] [1740012122.785210910] [ibpc_tester_node]: Sending request for scene_id 0 img_id 1 for objects array('Q', [18])
+[INFO] [1740012123.547388347] [ibpc_tester_node]: Got results: []
+[INFO] [1740012125.326573394] [ibpc_tester_node]: Sending request for scene_id 0 img_id 0 for objects array('Q', [18])
+[INFO] [1740012126.340159448] [ibpc_tester_node]: Got results: []
+[INFO] [1740012128.110107266] [ibpc_tester_node]: Sending request for scene_id 1 img_id 5 for objects array('Q', [14])
+[INFO] [1740012129.545785263] [ibpc_tester_node]: Got results: []
+[INFO] [1740012131.361073529] [ibpc_tester_node]: Sending request for scene_id 1 img_id 4 for objects array('Q', [14])
+[INFO] [1740012132.147259226] [ibpc_tester_node]: Got results: [ibpc_interfaces.msg.PoseEstimate(obj_id=14, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=-35.97752237106388, y=-43.980911656229765, z=1944.0234546835902), orientation=geometry_msgs.msg.Quaternion(x=0.014174599411342033, y=0.9705649271073079, z=-0.2395150222156359, w=-0.02086521348458312))), ibpc_interfaces.msg.PoseEstimate(obj_id=14, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=-96.90862385931379, y=143.68589160899882, z=1952.6883644843913), orientation=geometry_msgs.msg.Quaternion(x=-0.06701874171910106, y=0.904418150941101, z=-0.4204850611501449, w=0.02699277414841591)))]
+[INFO] [1740012134.004532155] [ibpc_tester_node]: Sending request for scene_id 1 img_id 3 for objects array('Q', [14])
+[INFO] [1740012135.022714779] [ibpc_tester_node]: Got results: [ibpc_interfaces.msg.PoseEstimate(obj_id=14, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=-23.51472483167864, y=171.62909720091636, z=1828.2759864344675), orientation=geometry_msgs.msg.Quaternion(x=0.1360638802890211, y=-0.575497443478442, z=0.7870454894868807, w=-0.1756380098635505))), ibpc_interfaces.msg.PoseEstimate(obj_id=14, score=1.0, pose=geometry_msgs.msg.Pose(position=geometry_msgs.msg.Point(x=-13.948976251096804, y=-21.14926911681635, z=1780.400756890512), orientation=geometry_msgs.msg.Quaternion(x=0.13112676995472627, y=0.8655358196455856, z=-0.46384908621413723, w=-0.1360056628600247)))]
 ```
 
 The results will come out as `submission.csv` when the tester is complete.
