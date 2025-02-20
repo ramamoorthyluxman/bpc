@@ -29,6 +29,8 @@ Make sure nvidia_docker is installed if you want cuda.
 
 ## Release instructions
 
+pip install build twine
+
 ```
 rm -rf dist/*
 python3 -m build --sdist .
