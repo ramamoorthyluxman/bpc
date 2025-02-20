@@ -59,6 +59,7 @@ The following instructions will guide you through the process of validating your
 - [Docker](https://docs.docker.com/) installed with the user in docker group for passwordless invocations.
 - 7z -- `apt install p7zip-full`
 - Python3 with virtualenv  -- `apt install python3-virtualenv`
+- The `ibpc` and `rocker` CLI tools are tested on Linux-based machines. Due to known Windows issues, we recommend Windows users develop using [WSL](https://learn.microsoft.com/en-us/windows/wsl/about).
 
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
