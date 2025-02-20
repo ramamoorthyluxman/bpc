@@ -63,7 +63,7 @@ The following instructions will guide you through the process of validating your
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
 #### Setup a workspace
-```
+```bash
 mkdir -p ~/bpc_ws
 ```
 
@@ -71,13 +71,13 @@ mkdir -p ~/bpc_ws
 
 📄 If you're already working in some form of virtualenv you can continue to use that and install `bpc` in that instead of making a new one. 
 
-```
+```bash
 python3 -m venv ~/bpc_ws/bpc_env
 ```
 
 #### Activate that virtual env
 
-```
+```bash
 source ~/bpc_ws/bpc_env/bin/activate
 ```
 
@@ -87,7 +87,7 @@ For any new shell interacting with the `bpc` command you will have to rerun this
 
 Install the bpc command from the ibpc pypi package. (bpc was already taken :-( )
 
-```
+```bash
 pip install ibpc
 ```
 
@@ -100,14 +100,14 @@ git clone https://github.com/opencv/bpc.git
 
 #### Fetch the dataset
 
-```
+```bash
 cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
 This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
 
 #### Quickstart with prebuilt images
-```
+```bash
 bpc test ghcr.io/opencv/bpc/bpc_pose_estimator:example ipd
 ```
 This will download the prebuilt zenoh, tester, and pose_estimator images and run containers based on them. The pose_estimator image contains an empty get_pose_estimates function. After the containers start, you should see the following in your terminal:
@@ -129,12 +129,12 @@ docker buildx build -t <POSE_ESTIMATOR_DOCKER_TAG> \
 ```
 
 and run it with the following command
-```
+```bash
 bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
 ```
 
 For example: 
-```
+```bash
 cd ~/bpc_ws/bpc
 docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
@@ -151,7 +151,7 @@ If you would like to interact with the estimator and run alternative commands or
 
 The tester console output will be streamed to the file `ibpc_test_output.log` Use this to see it
 
-```
+```bash
 tail -f ibpc_test_output.log
 ```
 
@@ -191,7 +191,7 @@ You can see the source of the tester and build your own version as follows if yo
 ### If you would like the training data and test data
 
 Use the command:
-```
+```bash
 bpc fetch ipd_all
 ```
 
@@ -231,6 +231,6 @@ docker buildx build -t bpc_tester:latest \
     .
 ```
 You can then use your tester image with the bpc tool, as shown in the example below:
-```
+```bash
 bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
 ```
