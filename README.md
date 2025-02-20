@@ -63,7 +63,7 @@ The following instructions will guide you through the process of validating your
 > Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
 
 #### Setup a workspace
-```
+```bash
 mkdir -p ~/bpc_ws
 ```
 
@@ -71,13 +71,13 @@ mkdir -p ~/bpc_ws
 
 📄 If you're already working in some form of virtualenv you can continue to use that and install `bpc` in that instead of making a new one. 
 
-```
+```bash
 python3 -m venv ~/bpc_ws/bpc_env
 ```
 
 #### Activate that virtual env
 
-```
+```bash
 source ~/bpc_ws/bpc_env/bin/activate
 ```
 
@@ -87,7 +87,7 @@ For any new shell interacting with the `bpc` command you will have to rerun this
 
 Install the bpc command from the ibpc pypi package. (bpc was already taken :-( )
 
-```
+```bash
 pip install ibpc
 ```
 
@@ -102,22 +102,23 @@ git checkout baseline_solution
 
 #### Fetch the dataset
 
-```
+```bash
 cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
 This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
 
-#### Quickstart with prebuilt images
+#### Setup the baseline solution
+Pull the Baseline Solution code
+
+```bash
+cd ~/bpc_ws/bpc
+wget https://storage.googleapis.com/akasha-public/IBPC/baseline_solution/v1/models.zip
+unzip models.zip
+rm models.zip
+git clone https://github.com/CIRP-Lab/bpc_baseline
 ```
-bpc test ghcr.io/opencv/bpc/bpc_pose_estimator:example ipd
-```
-This will download the prebuilt zenoh, tester, and pose_estimator images and run containers based on them. The pose_estimator image contains an empty get_pose_estimates function. After the containers start, you should see the following in your terminal:
-```
-[INFO] [1740003838.048516355] [bpc_pose_estimator]: Starting bpc_pose_estimator...
-[INFO] [1740003838.049547292] [bpc_pose_estimator]: Model directory set to /opt/ros/underlay/install/models.
-[INFO] [1740003838.050190130] [bpc_pose_estimator]: Pose estimates can be queried over srv /get_pose_estimates.
-```
+
 #### Build custom bpc_pose_estimator image
 
 You can then build custom bpc_pose_estimator image with your updated get_pose_estimates function
@@ -130,23 +131,13 @@ docker buildx build -t <POSE_ESTIMATOR_DOCKER_TAG> \
     .
 ```
 
-### Setup the baseline solution
-```bash
-### Pull Baseline Solution Code ###
-cd ~/bpc_ws/bpc
-wget https://storage.googleapis.com/akasha-public/IBPC/baseline_solution/v1/models.zip
-unzip models.zip
-rm models.zip
-git clone https://github.com/CIRP-Lab/bpc_baseline
-```
-
 and run it with the following command
-```
+```bash
 bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
 ```
 
 For example: 
-```
+```bash
 cd ~/bpc_ws/bpc
 docker buildx build -t bpc_pose_estimator:example \
     --file ./Dockerfile.estimator \
@@ -163,16 +154,11 @@ If you would like to interact with the estimator and run alternative commands or
 
 The tester console output will be streamed to the file `ibpc_test_output.log` Use this to see it
 
-```
+```bash
 tail -f ibpc_test_output.log
 ```
 
 The results will come out as `submission.csv` when the tester is complete.
-
-### Baseline Solution
-
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
-
 
 ### Tips
 
@@ -203,7 +189,7 @@ You can see the source of the tester and build your own version as follows if yo
 ### If you would like the training data and test data
 
 Use the command:
-```
+```bash
 bpc fetch ipd_all
 ```
 
@@ -243,6 +229,6 @@ docker buildx build -t bpc_tester:latest \
     .
 ```
 You can then use your tester image with the bpc tool, as shown in the example below:
-```
+```bash
 bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
 ```
