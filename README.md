@@ -113,7 +113,7 @@ git clone https://github.com/opencv/bpc.git
 cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
-This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
+This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined). The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
 
 #### Quickstart with prebuilt images
 ```bash
@@ -203,6 +203,7 @@ Use the command:
 ```bash
 bpc fetch ipd_all
 ```
+The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
 
 ### Manually Run components 
 
