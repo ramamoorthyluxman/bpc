@@ -4,7 +4,7 @@
 [![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
 [![test validation](https://github.com/opencv/bpc/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/test.yaml)
 
-For more details on the challenge, [click here](https://bpc.opencv.org/).
+Challenge [official website](https://bpc.opencv.org/).
 
 ![](../media/bpc.gif)
 
