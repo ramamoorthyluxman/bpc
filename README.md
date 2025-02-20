@@ -115,7 +115,7 @@ git checkout baseline_solution
 cd ~/bpc_ws/bpc
 bpc fetch ipd
 ```
-This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
+This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined). The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
 
 #### Setup the baseline solution <a name="baseline_solution"></a>
 Pull the Baseline Solution code
@@ -242,6 +242,7 @@ Use the command:
 ```bash
 bpc fetch ipd_all
 ```
+The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
 
 ### Manually Run components 
 
