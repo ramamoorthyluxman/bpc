@@ -4,9 +4,17 @@
 [![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
 [![test validation](https://github.com/opencv/bpc/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/test.yaml)
 
-For more details on the challenge, [click here](https://bpc.opencv.org/).
+Challenge [official website](https://bpc.opencv.org/).
 
 ![](../media/bpc.gif)
+
+## Key Steps for Participation
+1. [Set up the local environment](#settingup)
+2. [Download training and validation/testing data](#download_train_data)
+3. Prepare submission:
+    1. [Check the baseline solution for input/output examples](#baseline_solution)
+    2. [Build your custom image with your solution and test it locally](#build_custom_bpc_pe)
+4. [Submit your solution](#submission)
 
 ## Overview
 
@@ -46,11 +54,11 @@ The core architecture of the challenge is based on ROS 2. Participants are requi
 
 To simplify the evaluation process, Dockerfiles are provided to generate container images for both the PoseEstimatorNode and the TesterNode. This ensures that users can run their models without having to configure a dedicated ROS environment manually.
 
-## Submission Instructions
+## Submission Instructions <a name="submission"></a>
 
 Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. You can find detailed submission instructions [here](https://bpc.opencv.org/web/challenges/challenge-page/1/submission). Please make sure to register a team to get access to the submission instructions. 
 
-## Setting up
+## Setting up <a name="settingup"></a>
 
 The following instructions will guide you through the process of validating your submission locally before official submission.
 
@@ -109,7 +117,7 @@ bpc fetch ipd
 ```
 This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined).
 
-#### Setup the baseline solution
+#### Setup the baseline solution <a name="baseline_solution"></a>
 Pull the Baseline Solution code
 
 ```bash
@@ -228,7 +236,7 @@ The above is enough to get you going.
 However we want to be open about what else were doing.
 You can see the source of the tester and build your own version as follows if you'd like. 
 
-### If you would like the training data and test data
+### If you would like the training data and test data <a name="download_train_data"></a>
 
 Use the command:
 ```bash
