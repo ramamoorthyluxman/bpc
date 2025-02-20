@@ -90,8 +90,8 @@ def rot_to_quat(rot):
 class PoseEstimator(Node):
 
     def __init__(self):
-        super().__init__("ibp_pose_estimator")
-        self.get_logger().info("Starting ibpc_pose_estimator...")
+        super().__init__("bpc_pose_estimator")
+        self.get_logger().info("Starting bpc_pose_estimator...")
         # Declare parameters
         self.model_cache = {}
         self.model_dir = (
