@@ -80,8 +80,8 @@ class Camera:
 class PoseEstimator(Node):
 
     def __init__(self):
-        super().__init__("ibp_pose_estimator")
-        self.get_logger().info("Starting ibpc_pose_estimator...")
+        super().__init__("bpc_pose_estimator")
+        self.get_logger().info("Starting bpc_pose_estimator...")
         # Declare parameters
         self.model_dir = (
             self.declare_parameter("model_dir", "").get_parameter_value().string_value
