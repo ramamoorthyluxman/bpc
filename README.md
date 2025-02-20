@@ -8,6 +8,14 @@ For more details on the challenge, [click here](https://bpc.opencv.org/).
 
 ![](../media/bpc.gif)
 
+## Key Steps for Participation
+1. [Set up the local environment](#settingup)
+2. [Download training and validation/testing data](#download_train_data)
+3. Prepare submission:
+    1. [Check the baseline solution for input/output examples](#baseline_solution)
+    2. [Build your custom image with your solution and test it locally](#build_custom_bpc_pe)
+4. [Submit your solution](#submission)
+
 ## Overview
 
 This repository contains the sample submission code, ROS interfaces, and evaluation service for the Perception Challenge For Bin-Picking. The reason we openly share the tester code here is to give participants a chance to validate their submissions before submitting.
@@ -46,11 +54,11 @@ The core architecture of the challenge is based on ROS 2. Participants are requi
 
 To simplify the evaluation process, Dockerfiles are provided to generate container images for both the PoseEstimatorNode and the TesterNode. This ensures that users can run their models without having to configure a dedicated ROS environment manually.
 
-## Submission Instructions
+## Submission Instructions <a name="submission"></a>
 
 Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. You can find detailed submission instructions [here](https://bpc.opencv.org/web/challenges/challenge-page/1/submission). Please make sure to register a team to get access to the submission instructions. 
 
-## Setting up
+## Setting up <a name="settingup"></a>
 
 The following instructions will guide you through the process of validating your submission locally before official submission.
 
@@ -117,7 +125,7 @@ This will download the prebuilt zenoh, tester, and pose_estimator images and run
 [INFO] [1740003838.049547292] [bpc_pose_estimator]: Model directory set to /opt/ros/underlay/install/models.
 [INFO] [1740003838.050190130] [bpc_pose_estimator]: Pose estimates can be queried over srv /get_pose_estimates.
 ```
-#### Build custom bpc_pose_estimator image
+### Build and test custom bpc_pose_estimator image <a name="build_custom_bpc_pe"></a>
 
 You can then build custom bpc_pose_estimator image with your updated get_pose_estimates function
 
@@ -158,7 +166,7 @@ tail -f ibpc_test_output.log
 
 The results will come out as `submission.csv` when the tester is complete.
 
-### Baseline Solution
+### Baseline Solution <a name="baseline_solution"></a>
 
 We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
 
@@ -189,7 +197,7 @@ The above is enough to get you going.
 However we want to be open about what else were doing.
 You can see the source of the tester and build your own version as follows if you'd like. 
 
-### If you would like the training data and test data
+### If you would like the training data and test data <a name="download_train_data"></a>
 
 Use the command:
 ```bash
