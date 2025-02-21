@@ -64,7 +64,7 @@ The following instructions will guide you through the process of validating your
 
 #### Requirements
 
-- [Docker](https://docs.docker.com/) installed with the user in docker group for passwordless invocations.
+- [Docker](https://docs.docker.com/) installed with the user in docker group for passwordless invocations. Ensure Docker Buildx is installed (`docker buildx version`). If not, install it with `apt install docker-buildx-plugin` or `apt install docker-buildx` (distribution-dependent). 
 - 7z -- `apt install p7zip-full`
 - Python3 with virtualenv  -- `apt install python3-virtualenv`
 - The `ibpc` and `rocker` CLI tools are tested on Linux-based machines. Due to known Windows issues, we recommend Windows users develop using [WSL](https://learn.microsoft.com/en-us/windows/wsl/about).
