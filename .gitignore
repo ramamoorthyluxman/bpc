@@ -10,3 +10,5 @@ ipd_base.zip
 ipd_models.zip
 ipd_val.zip
 ipd/*
+sam/data/*
+sam/results/*
