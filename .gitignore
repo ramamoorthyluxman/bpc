@@ -12,3 +12,5 @@ ipd_val.zip
 ipd/*
 sam/data/*
 sam/results/*
+sam/sam_vit_*
+sam/lightning_logs
