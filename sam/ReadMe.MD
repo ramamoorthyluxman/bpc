@@ -150,6 +150,7 @@ Use your fine-tuned model for segmentation:
 ```bash
 python predict.py \
   --checkpoint ./results/vit_h_*/best_model.pth \
+  --sam_checkpoint /home/rama/bpc_ws/bpc/sam/sam_vit_h_4b8939.pth \
   --model_type vit_h \
   --image_path /path/to/image.jpg
 ```
