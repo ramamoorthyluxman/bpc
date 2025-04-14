@@ -15,3 +15,5 @@ sam/results/*
 sam/sam_vit_*
 sam/lightning_logs
 maskRCNN-resnet-50-fpn/results/*.pth
+maskRCNN/output/*.pth
+maskRCNN/output/*.jpg
