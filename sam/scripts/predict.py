@@ -59,7 +59,7 @@ def parse_args():
     
     return parser.parse_args()
 
-def prepare_image(image_path: str, target_size: int = 1024) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int]]:
+def prepare_image(image_path: str, target_size: int = 1024) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int], np.ndarray]:
     """
     Load and prepare image for SAM.
     
@@ -71,6 +71,7 @@ def prepare_image(image_path: str, target_size: int = 1024) -> Tuple[np.ndarray,
         original_image: Original image
         processed_image: Processed image in the format expected by SAM
         original_size: Original image size (H, W)
+        transform_matrix: Transformation matrix for converting between original and processed coordinates
     """
     # Load image
     original_image = np.array(Image.open(image_path).convert("RGB"))
@@ -100,10 +101,11 @@ def prepare_image(image_path: str, target_size: int = 1024) -> Tuple[np.ndarray,
     # Convert to tensor format
     processed_image = torch.from_numpy(square_img.transpose(2, 0, 1)).float() / 255.0
     
-    # Create transformation matrix for points
+    # Create transformation matrix for points (from original to processed)
     transform_matrix = np.array([
         [scale, 0, pad_w],
-        [0, scale, pad_h]
+        [0, scale, pad_h],
+        [0, 0, 1]  # Add homogeneous coordinate row for proper transformation
     ])
     
     return original_image, processed_image, original_size, transform_matrix
@@ -173,7 +175,16 @@ def extract_points_from_annotation(annotation_path: str, strategy: str = "center
     return points_list
 
 def transform_point(point: np.ndarray, transform_matrix: np.ndarray) -> np.ndarray:
-    """Transform point using the transformation matrix."""
+    """
+    Transform point using the transformation matrix.
+    
+    Args:
+        point: Point coordinates [x, y]
+        transform_matrix: 3x3 transformation matrix
+        
+    Returns:
+        Transformed point [x, y]
+    """
     # Convert to homogeneous coordinates
     point_h = np.array([point[0], point[1], 1])
     
@@ -196,13 +207,13 @@ def predict_masks(
     Args:
         model: SAM model
         image: Image tensor [3, H, W]
-        points: List of points to use as prompts
+        points: List of points to use as prompts (in original image coordinates)
         original_size: Original image size (H, W)
         transform_matrix: Transformation matrix to transform points
         device: Device to use
         
     Returns:
-        masks: Predicted masks [N, H, W]
+        masks: Predicted masks [N, 1, H, W]
         scores: Confidence scores for each mask
     """
     model.eval()
@@ -222,7 +233,7 @@ def predict_masks(
     
     # Convert to numpy
     masks = pred_masks.cpu().numpy()  # [N, 1, H, W]
-    scores = metrics["iou"]
+    scores = metrics["iou"] if isinstance(metrics, dict) and "iou" in metrics else [0.0] * len(masks)
     
     return masks, scores
 
@@ -237,83 +248,71 @@ def visualize_predictions(
     alpha: float = 0.5
 ):
     """
-    Visualize predicted masks.
+    Visualize predicted masks overlaid on the original image with bounding boxes.
     
     Args:
-        image: Original image
-        masks: Predicted masks [N, 1, H, W]
-        points: Points used as prompts
+        image: Original image (H, W, 3)
+        masks: Predicted masks [N, 1, H_mask, W_mask]
+        points: Points used as prompts (in original image coordinates)
         scores: Confidence scores for each mask
-        transform_matrix: Transformation matrix for points
+        transform_matrix: Transformation matrix (original to processed)
         output_path: Path to save visualization
         threshold: Threshold for binary mask
         alpha: Alpha value for mask overlay
     """
-    # Transform points back to original image space
-    # Make sure transform_matrix is 2x3
-    if transform_matrix.shape[0] == 2 and transform_matrix.shape[1] == 3:
-        # Create a proper 3x3 affine transformation matrix
-        affine_transform = np.vstack([transform_matrix, [0, 0, 1]])
-        inv_transform = np.linalg.inv(affine_transform)
-    else:
-        # Just use the inverse directly if it's already a full matrix
-        inv_transform = np.linalg.pinv(transform_matrix)
+    # Create figure with a single axis
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     
-    original_points = []
-    for point_set in points:
-        orig_points = []
-        for p in point_set:
-            # Add homogeneous coordinate
-            p_h = np.append(p, 1)
-            # Apply inverse transform
-            orig_p = inv_transform @ p_h
-            orig_points.append(orig_p[:2])
-        original_points.append(np.array(orig_points))
+    # Show original image
+    ax.imshow(image)
     
-    # Create figure
-    num_masks = len(masks)
-    fig, axes = plt.subplots(1, num_masks + 1, figsize=(4 * (num_masks + 1), 4))
-    
-    # Handle single mask case
-    if num_masks == 0:
-        axes = np.array([axes])
-    
-    # Show original image with points
-    axes[0].imshow(image)
-    axes[0].set_title("Original Image with Points")
-    axes[0].axis("off")
-    
-    # Plot points on original image
-    for i, point_set in enumerate(original_points):
+    # Process each mask
+    for i, mask in enumerate(masks):
+        # Get binary mask and resize to original image dimensions
+        binary_mask = (mask[0] > threshold).astype(np.uint8)
+        binary_mask = cv2.resize(binary_mask, (image.shape[1], image.shape[0]), 
+                               interpolation=cv2.INTER_NEAREST)
+        
+        if np.sum(binary_mask) == 0:  # Skip empty masks
+            continue
+            
+        # Find contours to get bounding box
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Get color for this mask (using a colormap)
         color = plt.cm.tab10(i % 10)
-        for p in point_set:
-            axes[0].scatter(p[0], p[1], c=[color], s=40, marker="*")
-    
-    # Show masks
-    for i in range(num_masks):
-        mask = masks[i, 0]  # [H, W]
+        color_rgb = (np.array(color[:3]) * 255).astype(np.uint8)
         
-        # Apply threshold
-        binary_mask = (mask > threshold).astype(np.float32)
+        # Create RGBA mask for overlay
+        colored_mask = np.zeros((image.shape[0], image.shape[1], 4), dtype=np.uint8)
+        colored_mask[binary_mask > 0] = [color_rgb[0], color_rgb[1], color_rgb[2], int(alpha * 255)]
+        ax.imshow(colored_mask)
         
-        # Show mask overlaid on image
-        axes[i + 1].imshow(image)
-        masked = np.ma.masked_where(binary_mask < 0.5, binary_mask)
-        axes[i + 1].imshow(masked, alpha=alpha, cmap="jet")
+        # Draw bounding box
+        for contour in contours:
+            x, y, w_rect, h_rect = cv2.boundingRect(contour)
+            rect = plt.Rectangle((x, y), w_rect, h_rect, 
+                                fill=False, color=color, linewidth=2)
+            ax.add_patch(rect)
         
-        # Show points
-        if i < len(original_points):
-            color = plt.cm.tab10(i % 10)
-            for p in original_points[i]:
-                axes[i + 1].scatter(p[0], p[1], c=[color], s=40, marker="*")
+        # Draw points
+        if i < len(points):
+            for p in points[i]:
+                ax.scatter(p[0], p[1], c=[color], s=80, marker="*", edgecolors='white', linewidths=1)
         
+        # Add label with score
         score = scores[i] if i < len(scores) else 0.0
-        axes[i + 1].set_title(f"Mask {i+1} (IoU: {score:.3f})")
-        axes[i + 1].axis("off")
+        if len(contours) > 0:
+            x, y, _, _ = cv2.boundingRect(contours[0])
+            ax.text(x, y - 5, f"Obj {i+1}: {score:.2f}", 
+                   color='white', fontsize=12, bbox=dict(facecolor=color, alpha=0.7))
+    
+    ax.set_title("Segmentation Results with Bounding Boxes")
+    ax.axis("off")
     
     # Save figure
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, bbox_inches='tight', dpi=300)
     plt.close()
     
     return output_path
