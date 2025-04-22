@@ -17,3 +17,8 @@ sam/lightning_logs
 maskRCNN-resnet-50-fpn/results/*.pth
 maskRCNN/output/*.pth
 maskRCNN/output/*.jpg
+datasets/
+maskRCNN/output
+maskRCNN-resnet-50-fpn/results
+sam/results
+sam/scripts/predictions

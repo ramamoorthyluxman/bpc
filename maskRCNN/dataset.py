@@ -278,6 +278,7 @@ if __name__ == "__main__":
     print(f"Dataset loaded with {len(dataset)} samples")
 
     # Export categories to file
+    print("Exporting the categories file.")
     dataset.export_categories('categories.txt')
     
     if len(dataset) > 0:

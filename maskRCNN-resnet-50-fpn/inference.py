@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument('--class_mapping', help='Path to class mapping JSON file')
     parser.add_argument('--input', required=True, help='Path to input image or directory')
     parser.add_argument('--output', required=True, help='Path to output directory')
-    parser.add_argument('--threshold', type=float, default=0.7, help='Detection threshold')
+    parser.add_argument('--threshold', type=float, default=0.2, help='Detection threshold')
     parser.add_argument('--device', default='cuda', help='Device to run inference on (cuda or cpu)')
     return parser.parse_args()
 

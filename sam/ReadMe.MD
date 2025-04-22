@@ -95,7 +95,7 @@ Each JSON annotation should follow this format:
 Process your dataset to convert polygon annotations to binary masks:
 
 ```bash
-python 1_data_preparation.py --data_dir /path/to/dataset --output_dir ./data/sam_dataset --visualize
+python data_preparation.py --data_dir /path/to/dataset --output_dir ./data/sam_dataset --visualize
 ```
 
 Options:
@@ -180,3 +180,6 @@ This project builds upon Meta AI's Segment Anything Model. The original SAM repo
 ## License
 
 This project is provided under the MIT License.
+
+
+python3 train.py   --data_dir /home/rama/bpc_ws/bpc/sam/data/ipd_preliminary   --checkpoint /home/rama/bpc_ws/bpc/sam/sam_vit_h_4b8939.pth   --model_type vit_h   --output_dir ../results   --freeze_image_encoder   --batch_size 1   --num_epochs 10   --lr 1e-5

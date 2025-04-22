@@ -1,335 +1,513 @@
-"""
-Dataset class for SAM fine-tuning with fixed 1024x1024 image size.
-"""
-
 import os
 import json
-import numpy as np
-import torch
 import cv2
+import torch
+import numpy as np
+from torch.utils.data import Dataset, DataLoader, random_split
+from torchvision import transforms
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-import random
 import matplotlib.pyplot as plt
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Optional, Union
+import random
+from tqdm import tqdm
 
 class SAMDataset(Dataset):
+    """
+    Dataset class for loading custom dataset with polygon masks for SAM fine-tuning.
+    """
     def __init__(
-        self, 
+        self,
         data_dir: str,
-        split: str = "train",
-        split_ratio: float = 0.8,
-        transform = None,
+        transform=None,
+        image_size: Tuple[int, int] = (1024, 1024),
         num_points: int = 1,
-        point_selection: str = "center",  # "center", "random", or "bbox"
-        image_size: int = 1024,
-        seed: int = 42
+        point_selection: str = "center",
+        create_masks: bool = True
     ):
         """
-        SAM dataset for fine-tuning.
+        Initialize dataset.
         
         Args:
-            data_dir: Path to processed dataset directory
-            split: "train" or "val"
-            split_ratio: Ratio of train/val split
-            transform: Optional transform to apply to images
+            data_dir: Path to dataset directory containing 'images' and 'annotations' folders
+            transform: Transform to apply to images and masks
+            image_size: Size to resize images to
             num_points: Number of points to use per mask
-            point_selection: How to select points from masks ("center", "random", or "bbox")
-            image_size: Size of the square images for SAM (must be 1024 for vit_h)
-            seed: Random seed for reproducibility
+            point_selection: Method for selecting points ("center", "random", "bbox")
+            create_masks: Whether to generate mask images from polygons if they don't exist
         """
         self.data_dir = data_dir
-        self.split = split
         self.transform = transform
+        self.image_size = image_size
         self.num_points = num_points
         self.point_selection = point_selection
-        self.image_size = image_size
+        self.create_masks = create_masks
         
-        # Set random seed
-        random.seed(seed)
-        np.random.seed(seed)
-        
-        # Load dataset info
-        with open(os.path.join(data_dir, "dataset_info.json"), 'r') as f:
-            self.dataset_info = json.load(f)
-        
-        # Get all annotation files
+        # Get annotation files
         self.annotations_dir = os.path.join(data_dir, "annotations")
-        annotation_files = [f for f in os.listdir(self.annotations_dir) if f.endswith(".json")]
+        self.images_dir = os.path.join(data_dir, "images")
+        self.masks_dir = os.path.join(data_dir, "masks")
         
-        # Split dataset
-        random.shuffle(annotation_files)
-        split_idx = int(len(annotation_files) * split_ratio)
+        if not os.path.exists(self.annotations_dir):
+            raise ValueError(f"Annotations directory not found: {self.annotations_dir}")
+        if not os.path.exists(self.images_dir):
+            raise ValueError(f"Images directory not found: {self.images_dir}")
         
-        if split == "train":
-            self.annotation_files = annotation_files[:split_idx]
-        elif split == "val":
-            self.annotation_files = annotation_files[split_idx:]
-        else:
-            raise ValueError(f"Invalid split: {split}, must be 'train' or 'val'")
+        # Create masks directory if it doesn't exist and we're generating masks
+        if self.create_masks and not os.path.exists(self.masks_dir):
+            os.makedirs(self.masks_dir)
         
-        print(f"Loaded {len(self.annotation_files)} samples for {split}")
+        # Load all annotations
+        self.annotation_files = [f for f in os.listdir(self.annotations_dir) if f.endswith(".json")]
+        self.data = []
+        
+        # Process annotations
+        for ann_file in tqdm(self.annotation_files, desc="Loading annotations"):
+            ann_path = os.path.join(self.annotations_dir, ann_file)
+            try:
+                with open(ann_path, "r") as f:
+                    annotation = json.load(f)
+                
+                # Get image path - handle both image_path and imagePath keys
+                image_path = annotation.get("image_path") or annotation.get("imagePath")
+                if not image_path:
+                    print(f"Warning: No image path found in {ann_file}, skipping")
+                    continue
+                
+                # Make sure the path is relative to the data directory
+                if "images/" in image_path:
+                    image_filename = image_path.split("images/")[-1]
+                else:
+                    image_filename = os.path.basename(image_path)
+                
+                # Create full image path
+                full_image_path = os.path.join(self.images_dir, image_filename)
+                if not os.path.exists(full_image_path):
+                    print(f"Warning: Image not found: {full_image_path}, skipping")
+                    continue
+                
+                # Store data
+                self.data.append({
+                    "annotation_file": ann_file,
+                    "image_path": full_image_path,
+                    "height": annotation.get("height"),
+                    "width": annotation.get("width"),
+                    "masks": annotation.get("masks", [])
+                })
+                
+                # Generate mask images if needed
+                if self.create_masks:
+                    for i, mask_info in enumerate(annotation.get("masks", [])):
+                        # Skip if mask_path is not provided
+                        mask_path = mask_info.get("mask_path")
+                        if not mask_path:
+                            # Generate mask path
+                            mask_filename = f"{os.path.splitext(image_filename)[0]}_{i}.png"
+                            mask_path = os.path.join("masks", mask_filename)
+                            mask_info["mask_path"] = mask_path
+                            
+                            # Update the annotation file with the new mask path
+                            annotation["masks"][i]["mask_path"] = mask_path
+                            with open(ann_path, "w") as f:
+                                json.dump(annotation, f, indent=2)
+                        
+                        # Create full mask path
+                        full_mask_path = os.path.join(self.data_dir, mask_path)
+                        
+                        # Generate mask image if it doesn't exist
+                        if not os.path.exists(full_mask_path) and "points" in mask_info:
+                            points = mask_info["points"]
+                            if len(points) >= 3:  # Need at least 3 points for a polygon
+                                self._generate_mask(
+                                    points, 
+                                    annotation.get("height"), 
+                                    annotation.get("width"), 
+                                    full_mask_path
+                                )
+            except Exception as e:
+                print(f"Error processing {ann_file}: {e}")
     
-    def __len__(self) -> int:
-        return len(self.annotation_files)
+    def __len__(self):
+        return len(self.data)
     
-    def preprocess_image(self, image: np.ndarray, target_size: int = 1024) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, idx):
         """
-        Preprocess image to exact target size (square).
-        Returns the processed image and the transformation matrix.
-        """
-        # Get original dimensions
-        h, w = image.shape[:2]
-        
-        # Calculate scale to fit within target_size
-        scale = min(target_size / h, target_size / w)
-        
-        # Calculate new dimensions
-        new_h, new_w = int(h * scale), int(w * scale)
-        
-        # Resize image
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        
-        # Create square image with padding
-        square_img = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-        
-        # Calculate padding
-        pad_h = (target_size - new_h) // 2
-        pad_w = (target_size - new_w) // 2
-        
-        # Place resized image in center
-        square_img[pad_h:pad_h+new_h, pad_w:pad_w+new_w] = resized
-        
-        # Create transformation matrix for points
-        transform_matrix = np.array([
-            [scale, 0, pad_w],
-            [0, scale, pad_h]
-        ])
-        
-        return square_img, transform_matrix
-    
-    def transform_point(self, point: np.ndarray, transform_matrix: np.ndarray) -> np.ndarray:
-        """Transform point using the transformation matrix."""
-        # Convert to homogeneous coordinates
-        point_h = np.array([point[0], point[1], 1])
-        
-        # Apply transformation
-        transformed = transform_matrix @ point_h
-        
-        return transformed[:2]
-    
-    def __getitem__(self, idx: int) -> Dict:
-        """Get a sample from the dataset."""
-        # Load annotation
-        annotation_file = self.annotation_files[idx]
-        with open(os.path.join(self.annotations_dir, annotation_file), 'r') as f:
-            annotation = json.load(f)
-        
-        # Load image
-        image_path = os.path.join(self.data_dir, annotation["image_path"])
-        original_image = np.array(Image.open(image_path).convert("RGB"))
-        
-        # Image dimensions
-        h, w = annotation["height"], annotation["width"]
-        original_size = (h, w)
-        
-        # Preprocess image to exact square size (1024x1024)
-        processed_image, transform_matrix = self.preprocess_image(original_image, self.image_size)
-        
-        # Convert to tensor (and normalize to [0, 1])
-        image_tensor = torch.from_numpy(processed_image.transpose(2, 0, 1)).float() / 255.0
-        
-        # Load masks and prepare data
-        masks = []
-        points = []
-        labels = []
-        
-        for mask_info in annotation["masks"]:
-            # Load mask
-            mask_path = os.path.join(self.data_dir, mask_info["mask_path"])
-            original_mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            original_mask = original_mask > 0  # Convert to binary
-            
-            # Get points based on selection method
-            selected_points = self._select_points(original_mask, mask_info["points"], h, w)
-            
-            # Transform points using the transformation matrix
-            transformed_points = np.array([self.transform_point(p, transform_matrix) for p in selected_points])
-            
-            # Transform mask to match the processed image
-            mask_processed = np.zeros((self.image_size, self.image_size), dtype=np.uint8)
-            
-            # Get original mask dimensions
-            mask_h, mask_w = original_mask.shape[:2]
-            
-            # Calculate new dimensions
-            scale = min(self.image_size / h, self.image_size / w)
-            new_h, new_w = int(h * scale), int(w * scale)
-            
-            # Resize mask
-            mask_resized = cv2.resize(
-                original_mask.astype(np.uint8), 
-                (new_w, new_h),
-                interpolation=cv2.INTER_NEAREST
-            )
-            
-            # Calculate padding
-            pad_h = (self.image_size - new_h) // 2
-            pad_w = (self.image_size - new_w) // 2
-            
-            # Place resized mask in center
-            mask_processed[pad_h:pad_h+new_h, pad_w:pad_w+new_w] = mask_resized
-            
-            masks.append(mask_processed)
-            points.append(transformed_points)
-            labels.append(mask_info["label"])
-        
-        # Convert lists to arrays/tensors
-        masks = np.array(masks, dtype=np.float32)
-        
-        # Create sample dictionary
-        sample = {
-            "image": image_tensor,
-            "masks": torch.from_numpy(masks).float(),
-            "points": [torch.from_numpy(p).float() for p in points],
-            "labels": labels,
-            "image_size": original_size,
-            "file_name": annotation_file
-        }
-        
-        # Apply additional transforms if provided
-        if self.transform:
-            sample = self.transform(sample)
-        
-        return sample
-    
-    def _select_points(self, mask: np.ndarray, polygon_points: List, h: int, w: int) -> np.ndarray:
-        """
-        Select points to use as prompt for SAM.
+        Get item from dataset.
         
         Args:
-            mask: Binary mask array
-            polygon_points: Original polygon points from annotation
-            h, w: Image height and width
+            idx: Index of item
             
         Returns:
-            ndarray: Selected points as [N, 2] array (x, y)
+            dict: Dictionary containing image, masks, points, labels, etc.
         """
-        if self.point_selection == "center":
-            # Use the center of mass of the mask
-            indices = np.where(mask > 0)
-            if len(indices[0]) == 0:  # Empty mask
-                return np.zeros((self.num_points, 2))
-                
-            y_center = np.mean(indices[0])
-            x_center = np.mean(indices[1])
-            points = np.array([[x_center, y_center]])
+        item = self.data[idx]
+        
+        # Load image
+        try:
+            image = Image.open(item["image_path"]).convert("RGB")
+        except Exception as e:
+            print(f"Error loading image {item['image_path']}: {e}")
+            # Return a random valid item
+            return self.__getitem__(random.randint(0, len(self.data) - 1))
+        
+        # Get original image dimensions
+        if item["height"] and item["width"]:
+            orig_height, orig_width = item["height"], item["width"]
+        else:
+            orig_width, orig_height = image.size
+        
+        # Initialize masks tensor and points list
+        masks = []
+        points_list = []
+        labels = []
+        
+        # Process each mask
+        for mask_idx, mask_info in enumerate(item["masks"]):
+            # Get mask path
+            mask_path = mask_info.get("mask_path")
+            if not mask_path:
+                continue
             
-        elif self.point_selection == "random":
-            # Select random points inside the mask
-            indices = np.where(mask > 0)
-            if len(indices[0]) == 0:  # Empty mask
-                return np.zeros((self.num_points, 2))
-                
-            random_idx = np.random.choice(len(indices[0]), size=min(self.num_points, len(indices[0])), replace=False)
-            points = np.array([[indices[1][i], indices[0][i]] for i in random_idx])
+            full_mask_path = os.path.join(self.data_dir, mask_path)
             
-        elif self.point_selection == "bbox":
-            # Use corners of the bounding box
-            indices = np.where(mask > 0)
-            if len(indices[0]) == 0:  # Empty mask
-                return np.zeros((self.num_points, 2))
+            # Load or generate mask
+            if os.path.exists(full_mask_path):
+                try:
+                    mask = Image.open(full_mask_path).convert("L")
+                except Exception as e:
+                    print(f"Error loading mask {full_mask_path}: {e}")
+                    continue
+            elif "points" in mask_info and len(mask_info["points"]) >= 3:
+                # Generate mask from points if it doesn't exist
+                points = mask_info["points"]
+                mask_np = self._create_mask_from_points(points, orig_height, orig_width)
+                mask = Image.fromarray(mask_np.astype(np.uint8) * 255)
                 
-            y_min, y_max = np.min(indices[0]), np.max(indices[0])
-            x_min, x_max = np.min(indices[1]), np.max(indices[1])
+                # Save mask if create_masks is enabled
+                if self.create_masks:
+                    os.makedirs(os.path.dirname(full_mask_path), exist_ok=True)
+                    mask.save(full_mask_path)
+            else:
+                continue
             
-            bbox_points = [
-                [x_min, y_min],  # Top-left
-                [x_max, y_min],  # Top-right
-                [x_max, y_max],  # Bottom-right
-                [x_min, y_max]   # Bottom-left
-            ]
-            points = np.array(bbox_points[:self.num_points])
+            # Get label
+            label = mask_info.get("label", "object")
+            
+            # Select points based on the method
+            if "points" in mask_info and len(mask_info["points"]) >= 3:
+                selected_points = self._select_points(
+                    mask_info["points"],
+                    self.point_selection,
+                    self.num_points,
+                    mask_np if "mask_np" in locals() else None
+                )
+            else:
+                # If no valid points, select center point or use default
+                mask_np = np.array(mask)
+                if np.any(mask_np > 0):
+                    # Find center of mass
+                    y_indices, x_indices = np.where(mask_np > 0)
+                    center_x = int(np.mean(x_indices))
+                    center_y = int(np.mean(y_indices))
+                    selected_points = [[center_x, center_y]]
+                else:
+                    # Default to center of image
+                    selected_points = [[orig_width // 2, orig_height // 2]]
+            
+            # Add to lists
+            masks.append(np.array(mask))
+            points_list.append(selected_points)
+            labels.append(label)
+        
+        # Handle case with no valid masks
+        if not masks:
+            # Create a dummy mask and point
+            empty_mask = np.zeros((orig_height, orig_width), dtype=np.uint8)
+            masks = [empty_mask]
+            points_list = [[[orig_width // 2, orig_height // 2]]]
+            labels = ["background"]
+        
+        # Resize image
+        image = image.resize(self.image_size, Image.Resampling.BILINEAR)
+        
+        # Resize masks
+        resized_masks = []
+        for mask in masks:
+            mask_pil = Image.fromarray(mask)
+            resized_mask = mask_pil.resize(self.image_size, Image.Resampling.NEAREST)
+            resized_masks.append(np.array(resized_mask))
+        
+        # Resize points
+        resized_points = []
+        for points in points_list:
+            scale_x = self.image_size[0] / orig_width
+            scale_y = self.image_size[1] / orig_height
+            scaled_points = [[int(p[0] * scale_x), int(p[1] * scale_y)] for p in points]
+            resized_points.append(scaled_points)
+        
+        # Convert to tensors
+        image_tensor = transforms.ToTensor()(image)
+        mask_tensors = torch.as_tensor(np.stack(resized_masks), dtype=torch.float32) / 255.0
+        point_tensors = [torch.tensor(points, dtype=torch.float32) for points in resized_points]
+        
+        # Apply transforms if provided
+        if self.transform is not None:
+            image_tensor, mask_tensors, point_tensors = self.transform(
+                image_tensor, mask_tensors, point_tensors
+            )
+        
+        return {
+            "image": image_tensor,
+            "masks": mask_tensors,
+            "points": point_tensors[0] if point_tensors else torch.zeros((1, 2)),
+            "labels": labels,
+            "image_path": item["image_path"],
+            "image_size": (orig_height, orig_width)
+        }
+    
+    def _generate_mask(self, points, height, width, mask_path):
+        """
+        Generate mask image from polygon points.
+        
+        Args:
+            points: List of [x, y] points
+            height: Image height
+            width: Image width
+            mask_path: Path to save mask
+        """
+        # Create mask
+        mask = self._create_mask_from_points(points, height, width)
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(mask_path), exist_ok=True)
+        
+        # Save mask
+        cv2.imwrite(mask_path, mask * 255)
+    
+    def _create_mask_from_points(self, points, height, width):
+        """
+        Create binary mask from polygon points.
+        
+        Args:
+            points: List of [x, y] points
+            height: Image height
+            width: Image width
+            
+        Returns:
+            mask: Binary mask
+        """
+        mask = np.zeros((height, width), dtype=np.uint8)
+        
+        # Convert points to the format expected by fillPoly
+        if len(points) < 3:
+            return mask
+            
+        pts = np.array(points, dtype=np.int32)
+        pts = pts.reshape((-1, 1, 2))
+        
+        # Fill polygon with white (1)
+        cv2.fillPoly(mask, [pts], 1)
+        
+        return mask
+    
+    def _select_points(self, polygon_points, method, num_points, mask=None):
+        """
+        Select points from polygon for prompting.
+        
+        Args:
+            polygon_points: List of polygon points
+            method: Method for selecting points ('center', 'random', 'bbox')
+            num_points: Number of points to select
+            mask: Binary mask image
+            
+        Returns:
+            points: Selected points
+        """
+        if method == "center":
+            # Calculate centroid
+            points_array = np.array(polygon_points)
+            center_x = int(np.mean(points_array[:, 0]))
+            center_y = int(np.mean(points_array[:, 1]))
+            
+            # Use centroid as the point
+            return [[center_x, center_y]]
+            
+        elif method == "random":
+            # Get a random subset of points
+            if len(polygon_points) <= num_points:
+                return polygon_points
+            else:
+                return random.sample(polygon_points, num_points)
+                
+        elif method == "bbox":
+            # Calculate bounding box
+            points_array = np.array(polygon_points)
+            x_min, y_min = np.min(points_array, axis=0)
+            x_max, y_max = np.max(points_array, axis=0)
+            
+            # Use center of bounding box
+            center_x = int((x_min + x_max) / 2)
+            center_y = int((y_min + y_max) / 2)
+            
+            return [[center_x, center_y]]
             
         else:
-            raise ValueError(f"Invalid point selection method: {self.point_selection}")
+            # Default to a single point at the center
+            points_array = np.array(polygon_points)
+            center_x = int(np.mean(points_array[:, 0]))
+            center_y = int(np.mean(points_array[:, 1]))
+            
+            return [[center_x, center_y]]
+            
+    def visualize_sample(self, idx):
+        """
+        Visualize a sample from the dataset.
         
-        # Ensure we have exactly num_points points (pad with zeros if necessary)
-        if len(points) < self.num_points:
-            padding = np.zeros((self.num_points - len(points), 2))
-            points = np.vstack([points, padding])
+        Args:
+            idx: Index of sample to visualize
+        """
+        sample = self[idx]
         
-        return points[:self.num_points]
+        # Get image and mask
+        image = sample["image"]
+        masks = sample["masks"]
+        points = sample["points"]
+        
+        # Convert to numpy for visualization
+        image_np = image.permute(1, 2, 0).numpy()
+        
+        # Iterate through masks and points
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+        
+        # Image with points
+        axes[0].imshow(image_np)
+        axes[0].set_title("Image with Points")
+        
+        for point in points:
+            axes[0].scatter(point[0], point[1], c='red', s=40, marker='*')
+            
+        axes[0].axis("off")
+        
+        # Image with mask overlay
+        axes[1].imshow(image_np)
+        
+        for i in range(masks.shape[0]):
+            mask_np = masks[i].numpy()
+            axes[1].imshow(mask_np, alpha=0.5, cmap="jet")
+            
+        axes[1].set_title("Image with Mask")
+        axes[1].axis("off")
+        
+        plt.tight_layout()
+        plt.show()
 
 
 class SAMTransform:
     """
-    Transform for SAM dataset.
-    Ensures all tensors are in the correct format.
+    Transforms for SAM dataset.
     """
-    def __call__(self, sample: Dict) -> Dict:
-        # Already handled in __getitem__
-        return sample
+    def __init__(self, train=True):
+        """
+        Initialize transforms.
+        
+        Args:
+            train: Whether this is for training or validation
+        """
+        self.train = train
+    
+    def __call__(self, image, masks, points):
+        """
+        Apply transforms to image, masks, and points.
+        
+        Args:
+            image: Image tensor [C, H, W]
+            masks: Mask tensor [N, H, W]
+            points: List of points tensors each [M, 2]
+            
+        Returns:
+            image: Transformed image
+            masks: Transformed masks
+            points: Transformed points
+        """
+        # Convert tensors to numpy for easier manipulation
+        image_np = image.permute(1, 2, 0).numpy()  # [H, W, C]
+        masks_np = masks.numpy()  # [N, H, W]
+        
+        # Apply transforms for training
+        if self.train:
+            # Random horizontal flip
+            if random.random() < 0.5:
+                image_np = np.fliplr(image_np).copy()
+                masks_np = np.fliplr(masks_np).copy()
+                
+                # Flip points
+                width = image_np.shape[1]
+                for i in range(len(points)):
+                    points[i][:, 0] = width - points[i][:, 0]
+            
+            # Random vertical flip
+            if random.random() < 0.5:
+                image_np = np.flipud(image_np).copy()
+                masks_np = np.flipud(masks_np).copy()
+                
+                # Flip points
+                height = image_np.shape[0]
+                for i in range(len(points)):
+                    points[i][:, 1] = height - points[i][:, 1]
+        
+        # Convert back to tensors
+        image = torch.from_numpy(image_np).permute(2, 0, 1)  # [C, H, W]
+        masks = torch.from_numpy(masks_np).float()  # [N, H, W]
+        
+        # Normalize image
+        image = image / 255.0
+        
+        return image, masks, points
 
 
-def visualize_sample(sample: Dict, figsize: Tuple[int, int] = (15, 10)):
+def collate_fn(batch):
     """
-    Visualize a sample from the dataset.
+    Collate function for SAM dataset.
     
     Args:
-        sample: Sample dictionary from dataset
-        figsize: Figure size for visualization
+        batch: List of samples from dataset
+        
+    Returns:
+        dict: Dictionary containing batched tensors
     """
-    image = sample["image"]
-    masks = sample["masks"]
-    points = sample["points"]
-    labels = sample["labels"]
+    # Get individual items
+    images = []
+    masks = []
+    points = []
+    labels = []
+    image_paths = []
+    image_sizes = []
     
-    # Convert tensors to numpy if needed
-    if isinstance(image, torch.Tensor):
-        image = image.permute(1, 2, 0).cpu().numpy()
-    if isinstance(masks, torch.Tensor):
-        masks = masks.cpu().numpy()
-    
-    n_masks = len(masks)
-    fig, axes = plt.subplots(n_masks, 3, figsize=figsize)
-    
-    # Handle single mask case
-    if n_masks == 1:
-        axes = axes.reshape(1, -1)
-    
-    for i in range(n_masks):
-        mask = masks[i]
+    for item in batch:
+        images.append(item["image"])
         
-        # Original image
-        axes[i, 0].imshow(image)
-        axes[i, 0].set_title(f"Image with Points ({labels[i]})")
-        axes[i, 0].axis('off')
+        # Ensure mask has proper dimensions (C, H, W)
+        mask = item["masks"]
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)  # Add channel dimension
+        masks.append(mask)
         
-        # Plot points
-        if isinstance(points[i], torch.Tensor):
-            pts = points[i].cpu().numpy()
-        else:
-            pts = points[i]
-            
-        for p in pts:
-            if np.all(p == 0):  # Skip zero points
-                continue
-            axes[i, 0].scatter(p[0], p[1], c='red', s=40, marker='*')
-        
-        # Mask
-        axes[i, 1].imshow(mask, cmap='gray')
-        axes[i, 1].set_title(f"Mask ({labels[i]})")
-        axes[i, 1].axis('off')
-        
-        # Overlay
-        axes[i, 2].imshow(image)
-        axes[i, 2].imshow(mask, alpha=0.5, cmap='jet')
-        axes[i, 2].set_title(f"Overlay ({labels[i]})")
-        axes[i, 2].axis('off')
+        points.append(item["points"])
+        labels.append(item["labels"])
+        image_paths.append(item["image_path"])
+        image_sizes.append(item["image_size"])
     
-    plt.tight_layout()
-    plt.show()
+    # Stack images - all should have the same size
+    images = torch.stack(images)
+    
+    # Return dictionary
+    return {
+        "image": images,
+        "masks": masks,  # List of tensors of varying sizes
+        "points": points,  # List of tensors
+        "labels": labels,  # List of strings
+        "image_path": image_paths,  # List of strings
+        "image_size": image_sizes  # List of tuples (h, w)
+    }
 
 
 def create_dataloaders(
@@ -339,58 +517,61 @@ def create_dataloaders(
     split_ratio: float = 0.8,
     num_points: int = 1,
     point_selection: str = "center",
-    image_size: int = 1024,
     seed: int = 42
-) -> Tuple[DataLoader, DataLoader]:
+):
     """
-    Create training and validation dataloaders.
+    Create DataLoaders for training and validation.
     
     Args:
-        data_dir: Path to processed dataset directory
+        data_dir: Path to dataset directory
         batch_size: Batch size
-        num_workers: Number of workers for dataloaders
-        split_ratio: Ratio of train/val split
+        num_workers: Number of workers for data loading
+        split_ratio: Train/validation split ratio
         num_points: Number of points to use per mask
-        point_selection: How to select points from masks
-        image_size: Size of square images for SAM (must be 1024 for vit_h)
-        seed: Random seed for reproducibility
+        point_selection: Method for selecting points
+        seed: Random seed
         
     Returns:
-        train_loader, val_loader: DataLoader objects
+        train_loader, val_loader: DataLoaders for training and validation
     """
-    # Create transforms
-    transform = SAMTransform()
+    # Set random seed for reproducibility
+    torch.manual_seed(seed)
+    random.seed(seed)
     
-    # Create datasets
-    train_dataset = SAMDataset(
+    # Create dataset
+    full_dataset = SAMDataset(
         data_dir=data_dir,
-        split="train",
-        split_ratio=split_ratio,
-        transform=transform,
+        transform=None,  # Will be applied later
+        image_size=(1024, 1024),
         num_points=num_points,
         point_selection=point_selection,
-        image_size=image_size,
-        seed=seed
+        create_masks=True
     )
     
-    val_dataset = SAMDataset(
-        data_dir=data_dir,
-        split="val",
-        split_ratio=split_ratio,
-        transform=transform,
-        num_points=num_points,
-        point_selection=point_selection,
-        image_size=image_size,
-        seed=seed
+    # Split dataset
+    dataset_size = len(full_dataset)
+    train_size = int(dataset_size * split_ratio)
+    val_size = dataset_size - train_size
+    
+    train_dataset, val_dataset = random_split(
+        full_dataset, [train_size, val_size]
     )
     
-    # Create dataloaders
+    print(f"Loaded {len(train_dataset)} samples for train")
+    print(f"Loaded {len(val_dataset)} samples for val")
+    
+    # Apply transforms
+    train_dataset.dataset.transform = SAMTransform(train=True)
+    val_dataset.dataset.transform = SAMTransform(train=False)
+    
+    # Create DataLoaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True
+        collate_fn=collate_fn,
+        drop_last=True
     )
     
     val_loader = DataLoader(
@@ -398,44 +579,8 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True
+        collate_fn=collate_fn,
+        drop_last=False
     )
     
     return train_loader, val_loader
-
-
-if __name__ == "__main__":
-    # Test dataset
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Test SAM dataset")
-    parser.add_argument("--data_dir", type=str, required=True, help="Path to processed dataset directory")
-    parser.add_argument("--num_samples", type=int, default=3, help="Number of samples to visualize")
-    parser.add_argument("--point_selection", type=str, default="center", choices=["center", "random", "bbox"],
-                        help="Point selection method")
-    parser.add_argument("--num_points", type=int, default=1, help="Number of points per mask")
-    parser.add_argument("--image_size", type=int, default=1024, help="Image size for SAM (must be 1024 for vit_h)")
-    
-    args = parser.parse_args()
-    
-    # Create dataset
-    dataset = SAMDataset(
-        data_dir=args.data_dir,
-        split="train",
-        transform=SAMTransform(),
-        num_points=args.num_points,
-        point_selection=args.point_selection,
-        image_size=args.image_size
-    )
-    
-    # Visualize samples
-    for i in range(min(args.num_samples, len(dataset))):
-        sample = dataset[i]
-        print(f"Sample {i}:")
-        print(f"  Image shape: {sample['image'].shape}")
-        print(f"  Masks shape: {sample['masks'].shape}")
-        print(f"  Number of points: {len(sample['points'])}")
-        print(f"  Labels: {sample['labels']}")
-        print(f"  Image size: {sample['image_size']}")
-        
-        visualize_sample(sample)

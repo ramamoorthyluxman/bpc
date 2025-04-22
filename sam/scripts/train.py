@@ -90,8 +90,7 @@ def visualize_predictions(images, masks_gt, masks_pred, points, output_dir, epoc
     # Convert tensors to numpy
     if isinstance(images, torch.Tensor):
         images = images.cpu().numpy().transpose(0, 2, 3, 1)  # [B, H, W, C]
-    if isinstance(masks_gt, torch.Tensor):
-        masks_gt = masks_gt.cpu().numpy()  # [B, N, H, W]
+    
     if isinstance(masks_pred, torch.Tensor):
         masks_pred = masks_pred.detach().cpu().numpy()  # [B, 1, H, W]
     
@@ -112,8 +111,11 @@ def visualize_predictions(images, masks_gt, masks_pred, points, output_dir, epoc
         # Normalize image for visualization if needed
         if image.max() > 1.0:
             image = image / 255.0
-            
-        mask_gt = masks_gt[i][0] if masks_gt[i].shape[0] > 0 else np.zeros_like(masks_pred[i][0])
+        
+        # Get ground truth mask for this sample
+        mask_gt = masks_gt[i][0].cpu().numpy() if i < len(masks_gt) else np.zeros_like(masks_pred[i][0])
+        
+        # Get predicted mask
         mask_pred = masks_pred[i][0]  # [H, W]
         
         # Convert mask_pred to binary using threshold of 0
@@ -124,14 +126,10 @@ def visualize_predictions(images, masks_gt, masks_pred, points, output_dir, epoc
         axes[i, 0].set_title("Image with Points")
         axes[i, 0].axis("off")
         
-        # Plot points
-        if i < len(points):  # Make sure we have points for this sample
-            if isinstance(points[i], torch.Tensor):
-                pts = points[i].cpu().numpy()
-                if len(pts.shape) == 2:  # Points are in correct format [N, 2]
-                    for p in pts:
-                        if not np.all(p == 0):  # Skip zero points (padding)
-                            axes[i, 0].scatter(p[0], p[1], c='red', s=40, marker='*')
+        # Plot points if available
+        if i < len(points):
+            pts = points[i].cpu().numpy()
+            axes[i, 0].scatter(pts[:, 0], pts[:, 1], c='red', s=40, marker='*')
         
         # Ground truth mask
         axes[i, 1].imshow(image)
@@ -178,59 +176,93 @@ def train_epoch(model, dataloader, criterion, optimizer, device, epoch, output_d
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")
     
     for batch_idx, batch in enumerate(pbar):
-        # Get data
-        images = batch["image"].to(device)
-        masks = batch["masks"].to(device)
-        points = [p.to(device) for p in batch["points"]]
-        original_sizes = batch["image_size"]
-        
-        # Zero gradients
-        optimizer.zero_grad()
-        
-        # Forward pass
-        pred_masks, metrics = model(images, points, original_sizes)
-        
-        # Calculate loss and backpropagate
-        batch_loss = 0
-        batch_iou = 0
-        
-        for i in range(images.size(0)):
-            # Use first mask for each image if multiple masks
-            mask_target = masks[i:i+1, 0:1]  # [1, 1, H, W]
+        try:
+            # Get data
+            images = batch["image"].to(device)
+            points = [p.to(device) for p in batch["points"]]
+            image_sizes = batch["image_size"]
             
-            # Get corresponding prediction
-            mask_pred = pred_masks[i:i+1]  # [1, 1, H, W]
+            # Get first mask for each sample (assuming single instance per image)
+            masks = []
+            for m in batch["masks"]:
+                # Ensure the mask has proper dimensions for the model
+                if m.dim() == 3 and m.size(0) > 0:  # [N, H, W]
+                    mask = m[0:1].to(device)  # Take first mask [1, H, W]
+                elif m.dim() == 2:  # [H, W]
+                    mask = m.unsqueeze(0).to(device)  # Add batch dimension [1, H, W] 
+                else:
+                    # Create a dummy mask filled with zeros
+                    mask = torch.zeros(1, images.shape[2], images.shape[3], device=device)
+                    
+                masks.append(mask.unsqueeze(1))  # Add channel dimension [1, 1, H, W]
             
-            # Calculate loss
-            loss = criterion(mask_pred, mask_target)
-            batch_loss += loss
+            # Zero gradients
+            optimizer.zero_grad()
             
-            # Calculate IoU
-            iou = calculate_iou(mask_pred.detach().cpu().numpy(), mask_target.cpu().numpy())
-            batch_iou += iou
-        
-        # Average loss for the batch
-        batch_loss /= images.size(0)
-        batch_iou /= images.size(0)
-        
-        # Backpropagate
-        batch_loss.backward()
-        optimizer.step()
-        
-        # Update metrics
-        total_loss += batch_loss.item() * images.size(0)
-        total_iou += batch_iou * images.size(0)
-        count += images.size(0)
-        
-        # Update progress bar
-        pbar.set_postfix(loss=batch_loss.item(), iou=batch_iou)
-        
-        # Visualize predictions occasionally
-        if batch_idx % 50 == 0:
-            visualize_predictions(
-                images, masks, pred_masks, points, 
-                output_dir, epoch, batch_idx
-            )
+            # Forward pass
+            pred_masks, metrics = model(images, points, image_sizes)
+            
+            # Calculate loss and backpropagate
+            batch_loss = 0
+            batch_iou = 0
+            
+            for i in range(images.size(0)):
+                # Get ground truth mask
+                mask_target = masks[i] if i < len(masks) else torch.zeros_like(pred_masks[i:i+1])
+                
+                # Get corresponding prediction
+                mask_pred = pred_masks[i:i+1]  # [1, 1, H, W]
+                
+                # Ensure valid dimensions
+                if mask_target.dim() != 4:
+                    print(f"Warning: Target mask has unexpected shape: {mask_target.shape}")
+                    mask_target = mask_target.view(1, 1, mask_target.size(0), mask_target.size(1))
+                
+                # Calculate loss
+                try:
+                    loss = criterion(mask_pred, mask_target)
+                    batch_loss += loss
+                    
+                    # Calculate IoU
+                    iou = calculate_iou(
+                        mask_pred.detach().cpu().numpy() > 0, 
+                        mask_target.cpu().numpy() > 0
+                    )
+                    batch_iou += iou
+                except Exception as e:
+                    print(f"Error calculating loss: {e}")
+                    print(f"Pred shape: {mask_pred.shape}, Target shape: {mask_target.shape}")
+                    # Skip this sample but continue training
+                    continue
+            
+            # Average loss for the batch
+            if images.size(0) > 0:
+                batch_loss /= images.size(0)
+                batch_iou /= images.size(0)
+                
+                # Backpropagate
+                batch_loss.backward()
+                optimizer.step()
+                
+                # Update metrics
+                total_loss += batch_loss.item() * images.size(0)
+                total_iou += batch_iou * images.size(0)
+                count += images.size(0)
+            
+            # Update progress bar
+            pbar.set_postfix(loss=batch_loss.item(), iou=batch_iou)
+            
+            # Visualize predictions occasionally
+            if batch_idx % 50 == 0:
+                visualize_predictions(
+                    images, masks, pred_masks, points, 
+                    output_dir, epoch, batch_idx
+                )
+                
+        except Exception as e:
+            print(f"Error in batch {batch_idx}: {e}")
+            # Continue with next batch
+            continue
     
     # Calculate average metrics
     avg_loss = total_loss / count if count > 0 else 0
@@ -250,52 +282,85 @@ def validate(model, dataloader, criterion, device, epoch, output_dir):
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(pbar):
-            # Get data
-            images = batch["image"].to(device)
-            masks = batch["masks"].to(device)
-            points = [p.to(device) for p in batch["points"]]
-            original_sizes = batch["image_size"]
-            
-            # Forward pass
-            pred_masks, metrics = model(images, points, original_sizes)
-            
-            # Calculate loss
-            batch_loss = 0
-            batch_iou = 0
-            
-            for i in range(images.size(0)):
-                # Use first mask for each image if multiple masks
-                mask_target = masks[i:i+1, 0:1]  # [1, 1, H, W]
+            try:
+                # Get data
+                images = batch["image"].to(device)
+                points = [p.to(device) for p in batch["points"]]
+                image_sizes = batch["image_size"]
                 
-                # Get corresponding prediction
-                mask_pred = pred_masks[i:i+1]  # [1, 1, H, W]
+                # Get first mask for each sample (assuming single instance per image)
+                masks = []
+                for m in batch["masks"]:
+                    # Ensure the mask has proper dimensions for the model
+                    if m.dim() == 3 and m.size(0) > 0:  # [N, H, W]
+                        mask = m[0:1].to(device)  # Take first mask [1, H, W]
+                    elif m.dim() == 2:  # [H, W]
+                        mask = m.unsqueeze(0).to(device)  # Add batch dimension [1, H, W] 
+                    else:
+                        # Create a dummy mask filled with zeros
+                        mask = torch.zeros(1, images.shape[2], images.shape[3], device=device)
+                        
+                    masks.append(mask.unsqueeze(1))  # Add channel dimension [1, 1, H, W]
                 
-                # Calculate loss
-                loss = criterion(mask_pred, mask_target)
-                batch_loss += loss
+                # Forward pass
+                pred_masks, metrics = model(images, points, image_sizes)
                 
-                # Calculate IoU
-                iou = calculate_iou(mask_pred.cpu().numpy(), mask_target.cpu().numpy())
-                batch_iou += iou
-            
-            # Average loss for the batch
-            batch_loss /= images.size(0)
-            batch_iou /= images.size(0)
-            
-            # Update metrics
-            total_loss += batch_loss.item() * images.size(0)
-            total_iou += batch_iou * images.size(0)
-            count += images.size(0)
-            
-            # Update progress bar
-            pbar.set_postfix(loss=batch_loss.item(), iou=batch_iou)
-            
-            # Visualize predictions occasionally
-            if batch_idx % 20 == 0:
-                visualize_predictions(
-                    images, masks, pred_masks, points, 
-                    output_dir, epoch, batch_idx
-                )
+                # Calculate loss and metrics
+                batch_loss = 0
+                batch_iou = 0
+                
+                for i in range(images.size(0)):
+                    # Get ground truth mask
+                    mask_target = masks[i] if i < len(masks) else torch.zeros_like(pred_masks[i:i+1])
+                    
+                    # Get corresponding prediction
+                    mask_pred = pred_masks[i:i+1]  # [1, 1, H, W]
+                    
+                    # Ensure valid dimensions
+                    if mask_target.dim() != 4:
+                        print(f"Warning: Target mask has unexpected shape: {mask_target.shape}")
+                        mask_target = mask_target.view(1, 1, mask_target.size(0), mask_target.size(1))
+                    
+                    # Calculate loss
+                    try:
+                        loss = criterion(mask_pred, mask_target)
+                        batch_loss += loss
+                        
+                        # Calculate IoU
+                        iou = calculate_iou(
+                            mask_pred.cpu().numpy() > 0, 
+                            mask_target.cpu().numpy() > 0
+                        )
+                        batch_iou += iou
+                    except Exception as e:
+                        print(f"Error calculating validation loss: {e}")
+                        print(f"Pred shape: {mask_pred.shape}, Target shape: {mask_target.shape}")
+                        # Skip this sample but continue validation
+                        continue
+                
+                # Average loss for the batch
+                if images.size(0) > 0:
+                    batch_loss /= images.size(0)
+                    batch_iou /= images.size(0)
+                    
+                    # Update metrics
+                    total_loss += batch_loss.item() * images.size(0)
+                    total_iou += batch_iou * images.size(0)
+                    count += images.size(0)
+                
+                # Update progress bar
+                pbar.set_postfix(loss=batch_loss.item(), iou=batch_iou)
+                
+                # Visualize predictions occasionally
+                if batch_idx % 20 == 0:
+                    visualize_predictions(
+                        images, masks, pred_masks, points, 
+                        output_dir, epoch, batch_idx
+                    )
+            except Exception as e:
+                print(f"Error in validation batch {batch_idx}: {e}")
+                # Continue with next batch
+                continue
     
     # Calculate average metrics
     avg_loss = total_loss / count if count > 0 else 0
@@ -392,48 +457,42 @@ def train(args):
             model, train_loader, criterion, optimizer, device, epoch + 1, output_dir
         )
         
-        # Validate if needed
-        if (epoch + 1) % args.eval_interval == 0:
-            val_loss, val_iou = validate(
-                model, val_loader, criterion, device, epoch + 1, output_dir
-            )
-            
-            # Update learning rate scheduler
-            scheduler.step(val_loss)
-            
-            # Check if this is the best model
-            if val_iou > best_iou:
-                best_iou = val_iou
-                # Save best model
-                torch.save({
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "scheduler_state_dict": scheduler.state_dict(),
-                    "best_loss": best_loss,
-                    "best_iou": best_iou,
-                    "train_losses": train_losses,
-                    "val_losses": val_losses,
-                    "train_ious": train_ious,
-                    "val_ious": val_ious,
-                }, os.path.join(output_dir, "best_model.pth"))
-                print(f"Saved best model with IoU: {best_iou:.4f}")
-        else:
-            val_loss = None
-            val_iou = None
+        # Validate
+        val_loss, val_iou = validate(
+            model, val_loader, criterion, device, epoch + 1, output_dir
+        )
+        
+        # Update learning rate scheduler
+        scheduler.step(val_loss)
+        
+        # Check if this is the best model
+        if val_iou > best_iou:
+            best_iou = val_iou
+            # Save best model
+            torch.save({
+                "epoch": epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "best_loss": best_loss,
+                "best_iou": best_iou,
+                "train_losses": train_losses,
+                "val_losses": val_losses,
+                "train_ious": train_ious,
+                "val_ious": val_ious,
+            }, os.path.join(output_dir, "best_model.pth"))
+            print(f"Saved best model with IoU: {best_iou:.4f}")
         
         # Save metrics
         train_losses.append(train_loss)
         train_ious.append(train_iou)
-        if val_loss is not None:
-            val_losses.append(val_loss)
-            val_ious.append(val_iou)
+        val_losses.append(val_loss)
+        val_ious.append(val_iou)
         
         # Print metrics
         print(f"Epoch {epoch + 1}/{args.num_epochs}:")
         print(f"  Train Loss: {train_loss:.4f}, Train IoU: {train_iou:.4f}")
-        if val_loss is not None:
-            print(f"  Val Loss: {val_loss:.4f}, Val IoU: {val_iou:.4f}")
+        print(f"  Val Loss: {val_loss:.4f}, Val IoU: {val_iou:.4f}")
         
         # Save checkpoint if needed
         if (epoch + 1) % args.save_interval == 0:
@@ -454,16 +513,14 @@ def train(args):
         plt.figure(figsize=(12, 5))
         plt.subplot(1, 2, 1)
         plt.plot(train_losses, label="Train Loss")
-        if val_losses:
-            plt.plot(val_losses, label="Val Loss")
+        plt.plot(val_losses, label="Val Loss")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.legend()
         
         plt.subplot(1, 2, 2)
         plt.plot(train_ious, label="Train IoU")
-        if val_ious:
-            plt.plot(val_ious, label="Val IoU")
+        plt.plot(val_ious, label="Val IoU")
         plt.xlabel("Epoch")
         plt.ylabel("IoU")
         plt.legend()
