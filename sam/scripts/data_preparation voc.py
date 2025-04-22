@@ -92,10 +92,10 @@ def process_annotations(data_dir, output_dir, visualize=False, num_samples=None)
             # Get image path and file name
             # Check which key exists in the annotation and use that one
             if "imagePath" in annotation:
-                image_filename = os.path.basename(annotation["imagePath"])                
+                image_filename = annotation["imagePath"]                
                 image_path = os.path.join(images_dir, os.path.basename(annotation["imagePath"]))
             elif "image_path" in annotation:
-                image_filename = os.path.basename(annotation["image_path"])
+                image_filename = annotation["image_path"]
                 image_path = os.path.join(images_dir, os.path.basename(annotation["image_path"]))
             else:
                 print("Error: No image path key found in annotation (tried both 'imagePath' and 'image_path')")
@@ -115,7 +115,10 @@ def process_annotations(data_dir, output_dir, visualize=False, num_samples=None)
             # Process each shape (polygon annotation)
             masks_info = []
             
-            for i, shape in enumerate(annotation["masks"]):
+            for i, shape in enumerate(annotation["shapes"]):
+                # Skip if not polygon
+                if shape["shape_type"] != "polygon":
+                    continue
                 
                 # Extract points and label
                 points = shape["points"]
@@ -132,7 +135,7 @@ def process_annotations(data_dir, output_dir, visualize=False, num_samples=None)
                     visualize_mask(image, mask, f"Mask for {label}")
                 
                 # Save mask
-                mask_filename = image_filename
+                mask_filename = f"{os.path.splitext(image_filename)[0]}_{i}.png"
                 cv2.imwrite(os.path.join(output_dir, "masks", mask_filename), mask * 255)
                 
                 # Store mask info

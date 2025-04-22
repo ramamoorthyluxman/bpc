@@ -141,7 +141,7 @@ python3 train_model.py --dataset_dir path/to/dataset --output_dir path/to/save/m
 ### Inference
 
 ```bash
-python3 inference_fixed.py --model_path path/to/model_final.pth --input path/to/image.jpg --output path/to/results
+python3 inference.py --model_path path/to/model_final.pth --input path/to/image.jpg --output path/to/results
 ```
 
 ## Approach & Design Considerations
@@ -181,3 +181,28 @@ Potential enhancements:
 - Model export to ONNX/TorchScript
 - Real-time inference options
 - Integration with popular annotation tools
+
+## Tips
+
+If you observe that your Mask R-CNN model is correctly predicting bounding boxes and classes, but the pixel-level segmentation masks are missing in some images. This is a common issue with instance segmentation models and can happen for several reasons:
+
+Confidence threshold for masks: The mask confidence might be below the threshold you're using. While the bounding box detector might be confident about an object's presence, the mask predictor might be less confident.
+Training imbalance: The model might have learned to detect objects (bounding boxes) better than segmenting them (masks). This can happen if:
+
+The loss weighting during training favored bounding box detection over mask prediction
+The training data had clearer boundaries for boxes than for detailed masks
+
+
+Complex geometries: Mechanical parts often have intricate shapes with thin structures, holes, or complex edges that are harder to segment accurately compared to simpler objects.
+Resolution issues: Mask prediction works better on higher-resolution features. If your objects are small in the images, the mask branch might struggle.
+Domain shift: If your test images differ significantly from training images (lighting, perspective, etc.), mask prediction can degrade more quickly than box detection.
+
+To improve mask predictions, you could try:
+
+Lower the mask threshold: In the inference.py script, you might have a threshold for displaying masks - try lowering it.
+Train longer with emphasis on mask loss: You can adjust the loss weights to give more importance to the mask branch.
+Increase image resolution: Try processing images at a higher resolution during inference.
+Data augmentation: If retraining, use more aggressive augmentation focusing on lighting and perspective changes.
+Adjust ROI size: In the model architecture, you might increase the size of the ROI features used for mask prediction.
+
+You could also verify this is happening by explicitly printing the mask confidence scores alongside the box confidence scores in your inference script to see if they differ significantly.RetryClaude can make mistakes. Please double-check responses.

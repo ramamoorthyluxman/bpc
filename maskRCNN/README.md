@@ -88,7 +88,7 @@ Additional training options:
 ### 4. Evaluate the model
 
 ```bash
-python evaluate.py --data-path /path/to/your/dataset --model-path ./output/model_final.pth --evaluate --visualize
+python evaluation.py --data-path /path/to/your/dataset --model-path ./output/model_final.pth --evaluate --visualize
 ```
 
 ### 5. Run inference on new images
