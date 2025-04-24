@@ -22,3 +22,5 @@ maskRCNN/output
 maskRCNN-resnet-50-fpn/results
 sam/results
 sam/scripts/predictions
+initial_pose_estimation/results
+initial_pose_estimation/indices
