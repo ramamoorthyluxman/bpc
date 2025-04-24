@@ -1,23 +1,24 @@
-# Intial Object Pose Estimation - for better registration
+# Deep Pose Estimation
 
-This repository contains a robust pipeline for object pose estimation using a hybrid approach combining CNN features and keypoint matching. Given a test image and an object ID, it finds the closest matching pose from a database of known poses and returns the corresponding rotation matrix.
+A robust and accurate approach for estimating 3D object poses using deep learning. This system directly regresses rotation matrices from single RGB images, providing high accuracy and robustness to scale, rotation, and lighting variations.
 
 ## Overview
 
-The system uses a three-stage approach:
-1. **Feature Extraction**: Extract deep features from images using a pre-trained ResNet-50 model
-2. **Feature Database**: Build a searchable database of features with dimensionality reduction and efficient nearest neighbor search
-3. **Pose Matching**: Match test images to the database using a hybrid approach of CNN features and keypoint matching
+This project implements a direct pose regression approach using deep neural networks. Instead of template matching or keypoint detection, we train a CNN to directly predict the rotation matrix from an input image. This approach has several advantages:
+
+- **Robustness**: Handles scale, rotation, and lighting variations
+- **Accuracy**: Learns from the entire dataset to make precise predictions
+- **Efficiency**: Fast inference with a single forward pass through the network
+- **Generalization**: Can interpolate between training poses for smoother results
 
 ## Project Structure
 
 ```
 .
-├── 01_extract_features.py     # Extract CNN features from all database images
-├── 02_build_indices.py        # Build search indices and load rotation matrices
-├── 03_match_pose.py           # Match test images to database poses
-├── requirements.txt           # List of required Python packages
-└── README.md                  # This file
+├── 01_train_regression_model.py    # Training script for pose regression
+├── 02_predict_pose.py              # Inference script for pose prediction
+├── requirements.txt                # Required Python packages
+└── README.md                       # This file
 ```
 
 ## Installation
@@ -29,98 +30,102 @@ The system uses a three-stage approach:
 pip install -r requirements.txt
 ```
 
-## Dataset Structure
+## Dataset Requirements
 
-The code assumes a dataset with the following structure:
+The code expects a dataset with the following structure:
+
 ```
 defined_poses/
-├── 000000/                     # Object ID folder
+├── 000000/                    # Object ID folder
 │   ├── rot_000.png            # Pose images
 │   ├── rot_001.png
 │   └── ...
 ├── 000001/
 │   └── ...
-└── rotation_matrices/          # Rotation matrix files
-    ├── 000000.txt             # One 3x3 matrix per line
+└── rotation_matrices/         # Rotation matrix files
+    ├── 000000.txt             # Each line contains a 3x3 matrix (9 values)
     ├── 000001.txt
     └── ...
 ```
 
+Each object folder should contain images of the object in different orientations, and the rotation_matrices folder should contain corresponding rotation matrices.
+
 ## Usage
 
-### 1. Extract Features
+### 1. Training a Pose Regression Model
 
-Extract deep features from all images in the dataset:
+To train a model for a specific object:
 
 ```bash
-python 01_extract_features.py --data_dir /path/to/defined_poses --output_dir /path/to/features
-
-# Process specific objects
-python 01_extract_features.py --data_dir /path/to/defined_poses --output_dir /path/to/features --object_ids 000000 000001
+python 01_train_regression_model.py --data_dir /path/to/defined_poses --object_id 000000 --output_dir /path/to/models
 ```
 
 Parameters:
-- `--data_dir`: Root directory of the dataset
-- `--output_dir`: Directory to save extracted features
-- `--object_ids`: (Optional) List of specific object IDs to process
-- `--batch_size`: Batch size for feature extraction (default: 32)
-- `--num_workers`: Number of workers for data loading (default: 4)
-- `--force`: Force re-extraction of features even if they already exist
+- `--data_dir`: Root directory containing the dataset
+- `--object_id`: ID of the object to train on
+- `--output_dir`: Directory to save trained models
+- `--batch_size`: Batch size for training (default: 32)
+- `--num_workers`: Number of data loading workers (default: 4)
+- `--learning_rate`: Initial learning rate (default: 0.001)
+- `--weight_decay`: Weight decay for regularization (default: 1e-4)
+- `--epochs`: Number of training epochs (default: 25)
 
-### 2. Build Search Indices
+The script automatically:
+- Splits the data into training and validation sets
+- Applies data augmentation for better robustness
+- Uses a custom loss function that ensures valid rotation matrices
+- Saves the best model based on validation loss
+- Generates a training loss plot
 
-Build search indices and load rotation matrices:
+### 2. Predicting Poses
+
+To predict the pose for test images:
 
 ```bash
-python 02_build_indices.py --feature_dir /path/to/features --rotation_dir /path/to/defined_poses/rotation_matrices --output_dir /path/to/indices
+# Basic usage
+python 02_predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image.png
+
+# With visualization and saving results
+python 02_predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image1.png /path/to/test_image2.png --display --save_visualization --save_results
 ```
 
 Parameters:
-- `--feature_dir`: Directory containing extracted features
-- `--rotation_dir`: Directory containing rotation matrices
-- `--output_dir`: Directory to save indices
-- `--object_ids`: (Optional) List of specific object IDs to process
-- `--n_components`: Number of PCA components to use (default: 128)
-- `--force`: Force rebuilding of indices even if they already exist
+- `--model_path`: Path to the trained model checkpoint
+- `--test_images`: Paths to test images (can specify multiple)
+- `--output_dir`: Directory to save results (default: 'results')
+- `--display`: Display visualization (flag)
+- `--save_visualization`: Save visualizations to file (flag)
+- `--save_results`: Save rotation matrices to text files (flag)
 
-### 3. Match Pose
+## Advanced Tips
 
-Match a test image to the closest pose in the database:
+### Improving Model Performance
 
-```bash
-# Basic usage (CNN features only)
-python 03_match_pose.py --test_image /path/to/test_image.png --object_id 000000 --index_dir /path/to/indices
+1. **More Training Data**: The model benefits from seeing more poses. If possible, add more training images.
 
-# With keypoint verification and visualization
-python 03_match_pose.py --test_image /path/to/test_image.png --object_id 000000 --index_dir /path/to/indices --use_keypoints --display --show_keypoints
-```
+2. **Data Augmentation**: The training script already includes basic augmentation. For more robust models, consider adding:
+   - Random noise
+   - Background changes
+   - More aggressive lighting variations
 
-Parameters:
-- `--test_image`: Path to the test image
-- `--object_id`: Object ID for the test image
-- `--index_dir`: Directory containing index files
-- `--use_keypoints`: Use keypoint matching for verification
-- `--top_k`: Number of top candidates to consider for keypoint verification (default: 5)
-- `--display`: Display the matching results
-- `--show_keypoints`: Show keypoint matches in the visualization
+3. **Fine-tuning**: If you have a small dataset for a specific object, consider first pre-training on all objects, then fine-tuning.
 
-## Pipeline Details
+4. **Ensemble Models**: For critical applications, train multiple models and ensemble their predictions.
 
-### CNN Feature Extraction
-The system uses ResNet-50 pre-trained on ImageNet to extract 2048-dimensional feature vectors from images. These features capture semantic information about the objects and their poses.
+### Handling Challenging Cases
 
-### Dimensionality Reduction
-PCA is applied to reduce the dimensionality of feature vectors to 128 dimensions, making similarity search more efficient while preserving most of the variance.
+- **Symmetrical Objects**: Objects with symmetry may have multiple valid rotations. Consider using a more appropriate representation like quaternions.
 
-### Nearest Neighbor Search
-The system uses scikit-learn's NearestNeighbors to find the closest matching images based on cosine similarity between feature vectors.
+- **Occlusions**: If objects may be partially occluded, include such examples in training.
 
-### Keypoint Verification (Optional)
-For increased robustness, a second stage of verification uses ORB keypoints to match local features between the test image and top candidates from CNN matching.
+- **Similar Background**: If the background in test images might be similar to the object, train with diverse backgrounds.
 
-## Tips and Troubleshooting
+## Evaluation
 
-- For best results, use the `--use_keypoints` flag when matching poses
-- If keypoint matching is slow, decrease the `--top_k` parameter
-- The feature extraction step is computationally intensive but only needs to be run once per dataset
-- You can process a subset of objects by using the `--object_ids` parameter
+To evaluate your model, you can:
+
+1. **Calculate Angular Error**: Compute the angular difference between predicted and ground truth rotations.
+
+2. **Visualize Predictions**: Use the visualization in the prediction script to assess quality visually.
+
+3. **Test on Varied Conditions**: Validate on images with different lighting, scale, and viewpoints.
