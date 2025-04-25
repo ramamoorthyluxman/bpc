@@ -1,0 +1,4 @@
+numpy>=1.18.0
+opencv-python>=4.2.0
+open3d>=0.13.0
+argparse>=1.4.0
