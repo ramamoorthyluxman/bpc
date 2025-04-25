@@ -6,10 +6,11 @@ import cv2
 from pathlib import Path
 import shutil
 from tqdm import tqdm
+from scipy.spatial import ConvexHull
 
 # Define paths
-dataset_path = "/home/rama/bpc_ws/bpc/ipd/val/000000"  # Your dataset folder
-output_path = "/home/rama/bpc_ws/bpc/datasets/ipd_val/000000"  # Output folder
+dataset_path = "/home/rama/bpc_ws/bpc/ipd/val/000001"  # Your dataset folder
+output_path = "/home/rama/bpc_ws/bpc/datasets/ipd_val/000001"  # Output folder
 models_path = "/home/rama/bpc_ws/bpc/ipd/models"  # 3D models folder
 
 # Create output directories
@@ -46,44 +47,122 @@ def load_model(obj_id):
     mesh = trimesh.load(model_path)
     return mesh
 
-# Project 3D model to 2D image
-def project_model_to_2d(mesh, K, R, t):
-    # Get mesh vertices
-    vertices = np.array(mesh.vertices)
+# Render model silhouette
+def render_silhouette(mesh, cam_K, R, t, img_shape):
+    # Create a scene with the mesh
+    scene = trimesh.Scene()
     
-    # Convert to homogeneous coordinates
-    homogeneous_vertices = np.hstack((vertices, np.ones((vertices.shape[0], 1))))
+    # Apply the transformation to the mesh
+    transformed_mesh = mesh.copy()
+    transformed_mesh.apply_transform(np.vstack([
+        np.hstack([R, t.reshape(3, 1)]),
+        [0, 0, 0, 1]
+    ]))
     
-    # Transform to camera coordinates: R*X + t
-    camera_coords = np.dot(R, vertices.T).T + t
+    scene.add_geometry(transformed_mesh)
     
-    # Project to image plane
-    image_coords = np.dot(K, camera_coords.T).T
+    # Configure the camera
+    fx, fy = cam_K[0, 0], cam_K[1, 1]
+    cx, cy = cam_K[0, 2], cam_K[1, 2]
     
-    # Convert to pixel coordinates
-    pixel_coords = image_coords[:, :2] / image_coords[:, 2:3]
+    # Create a camera with a resolution matching the image
+    camera = trimesh.scene.Camera(
+        resolution=(img_shape[1], img_shape[0]),
+        focal=(fx, fy),
+        fov=None,
+        center=(cx, cy)
+    )
     
-    return pixel_coords
+    # Set the camera to the scene
+    scene.camera = camera
+    
+    # Render the silhouette
+    silhouette = scene.save_image(resolution=(img_shape[1], img_shape[0]), visible=True)
+    
+    # Convert to binary mask
+    silhouette_gray = cv2.cvtColor(silhouette, cv2.COLOR_RGB2GRAY)
+    _, mask = cv2.threshold(silhouette_gray, 1, 255, cv2.THRESH_BINARY)
+    
+    return mask
 
-# Create polygon from projected points
-def create_polygon(pixel_coords, img_shape):
-    # Filter points inside image boundaries
-    valid_points = []
-    for x, y in pixel_coords:
-        if 0 <= x < img_shape[1] and 0 <= y < img_shape[0]:
-            valid_points.append([int(x), int(y)])
+# Create detailed polygon from silhouette
+def create_detailed_polygon(mask, simplify_factor=0.001):
+    # Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    if len(valid_points) < 3:
+    if not contours:
         return None
     
-    # Compute convex hull
-    hull = cv2.convexHull(np.array(valid_points))
+    # Get the largest contour
+    max_contour = max(contours, key=cv2.contourArea)
     
-    # Simplify polygon if needed
-    epsilon = 0.001 * cv2.arcLength(hull, True)
-    polygon = cv2.approxPolyDP(hull, epsilon, True)
+    # Simplify the contour (adjust epsilon for more or less detail)
+    epsilon = simplify_factor * cv2.arcLength(max_contour, True)
+    approx_polygon = cv2.approxPolyDP(max_contour, epsilon, True)
     
-    return polygon.reshape(-1, 2).tolist()
+    # Convert to the format needed for the annotation
+    polygon = approx_polygon.reshape(-1, 2).tolist()
+    
+    # Make sure the polygon has at least 3 points
+    if len(polygon) < 3:
+        return None
+        
+    return polygon
+
+# Alternative approach using a depth buffer for occlusion handling
+def create_polygon_from_mesh(mesh, cam_K, R, t, img_shape, simplify_factor=0.001):
+    # Get mesh faces and vertices
+    vertices = np.array(mesh.vertices)
+    faces = np.array(mesh.faces)
+    
+    # Transform vertices to camera coordinates
+    vertices_homogeneous = np.hstack((vertices, np.ones((vertices.shape[0], 1))))
+    camera_coords = np.dot(vertices_homogeneous, np.vstack([
+        np.hstack([R, t.reshape(3, 1)]),
+        [0, 0, 0, 1]
+    ]).T)
+    
+    # Project to image plane
+    projected_points = np.dot(camera_coords[:, :3], cam_K.T)
+    projected_points = projected_points[:, :2] / projected_points[:, 2:3]
+    
+    # Create an empty mask
+    mask = np.zeros(img_shape[:2], dtype=np.uint8)
+    
+    # Filter visible faces (those with all vertices in front of camera)
+    visible_faces = []
+    for face in faces:
+        if all(camera_coords[v, 2] > 0 for v in face):
+            visible_faces.append(face)
+    
+    # Draw the visible faces on the mask
+    for face in visible_faces:
+        pts = projected_points[face].astype(np.int32)
+        # Check if points are within image boundaries
+        if all(0 <= p[0] < img_shape[1] and 0 <= p[1] < img_shape[0] for p in pts):
+            cv2.fillPoly(mask, [pts], 255)
+    
+    # Find contours on the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return None
+    
+    # Get the largest contour
+    max_contour = max(contours, key=cv2.contourArea)
+    
+    # Simplify the contour
+    epsilon = simplify_factor * cv2.arcLength(max_contour, True)
+    approx_polygon = cv2.approxPolyDP(max_contour, epsilon, True)
+    
+    # Convert to the format needed for the annotation
+    polygon = approx_polygon.reshape(-1, 2).tolist()
+    
+    # Make sure the polygon has at least 3 points
+    if len(polygon) < 3:
+        return None
+        
+    return polygon
 
 # Process all cameras
 for cam_id in [1, 2, 3]:
@@ -151,18 +230,31 @@ for cam_id in [1, 2, 3]:
                 print(f"Warning: Model obj_{obj_id:06d}.ply not found")
                 continue
             
-            # Project 3D model to 2D
-            pixel_coords = project_model_to_2d(mesh, cam_K, R, t)
-            
-            # Create polygon
-            polygon = create_polygon(pixel_coords, (height, width))
-            
-            if polygon:
-                # Add to annotation
-                annotation["masks"].append({
-                    "label": f"obj_{obj_id:06d}",
-                    "points": polygon
-                })
+            # Try to create a detailed polygon
+            try:
+                # Method 1: Try to render the silhouette
+                # polygon = create_detailed_polygon(
+                #     render_silhouette(mesh, cam_K, R, t, (height, width)),
+                #     simplify_factor=0.0005  # Adjust for more detail
+                # )
+                
+                # Method 2: Alternative approach using depth buffer
+                polygon = create_polygon_from_mesh(
+                    mesh, cam_K, R, t, (height, width),
+                    simplify_factor=0.0005  # Adjust for more detail
+                )
+                
+                if polygon:
+                    # Add to annotation
+                    annotation["masks"].append({
+                        "label": f"obj_{obj_id:06d}",
+                        "points": polygon
+                    })
+                else:
+                    print(f"Warning: Could not create polygon for object {obj_id} in scene {scene_id}")
+                    
+            except Exception as e:
+                print(f"Error processing object {obj_id} in scene {scene_id}: {e}")
         
         # Save annotation
         with open(os.path.join(output_path, "annotations", f"{int(scene_id):06d}_cam{cam_id}.json"), 'w') as f:
