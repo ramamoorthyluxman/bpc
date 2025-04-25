@@ -24,3 +24,4 @@ sam/results
 sam/scripts/predictions
 initial_pose_estimation/results
 initial_pose_estimation/indices
+pcl_builder/output/*
