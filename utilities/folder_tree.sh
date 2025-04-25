@@ -13,7 +13,7 @@ show_tree() {
     done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0 | sort -z)
 
     local total=${#entries[@]}
-    local max_display=5
+    local max_display=10000
 
     if (( total <= max_display )); then
         for entry in "${entries[@]}"; do
