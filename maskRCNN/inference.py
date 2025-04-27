@@ -9,6 +9,7 @@ import torchvision.transforms as T
 import glob
 import time
 import cv2
+import json
 
 from model import get_model_instance_segmentation
 
@@ -159,7 +160,98 @@ def visualize_prediction(image, output, categories, output_path=None, show_masks
         plt.show()
 
 
-def process_image(image_path, model, categories, output_dir, device, threshold=0.5, show=False):
+def mask_to_points(mask):
+    """
+    Convert binary mask to list of contour points
+    
+    Args:
+        mask: Binary mask as numpy array (2D)
+        
+    Returns:
+        points: List of [x, y] contour points
+    """
+    # Ensure mask is binary
+    mask_binary = (mask > 0.5).astype(np.uint8)
+    
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Get the largest contour (if multiple are found)
+    if not contours:
+        return []
+    
+    largest_contour = max(contours, key=cv2.contourArea)
+    
+    # Convert to list of points
+    points = [[int(point[0][0]), int(point[0][1])] for point in largest_contour]
+    
+    return points
+
+
+def save_annotations(image_path, height, width, output, categories, output_path):
+    """
+    Save predictions as annotations in JSON format
+    
+    Args:
+        image_path: Path to the input image
+        height: Image height
+        width: Image width
+        output: Model output dictionary
+        categories: List of category names
+        output_path: Path to save the annotation JSON
+    """
+    # Get prediction components
+    labels = output['labels'].cpu().numpy()
+    masks = output['masks'].cpu().numpy() if 'masks' in output else None
+    
+    # Prepare annotation data
+    annotation_data = {
+        "image_path": image_path,
+        "height": height,
+        "width": width,
+        "masks": []
+    }
+    
+    # Create mask directory if needed
+    mask_dir = os.path.join(os.path.dirname(output_path), "masks")
+    os.makedirs(mask_dir, exist_ok=True)
+    
+    # Process each mask
+    if masks is not None:
+        base_name = os.path.basename(image_path).split('.')[0]
+        
+        for i, (mask, label) in enumerate(zip(masks, labels)):
+            # Get category name
+            category_name = categories[label] if label < len(categories) else f"Class_{label}"
+            
+            # Convert mask to points
+            points = mask_to_points(mask[0])
+            
+            if not points:
+                continue
+            
+            # Save mask image if needed
+            mask_path = f"masks/{base_name}_{i}.png"
+            full_mask_path = os.path.join(os.path.dirname(output_path), mask_path)
+            mask_img = (mask[0] > 0.5).astype(np.uint8) * 255
+            cv2.imwrite(full_mask_path, mask_img)
+            
+            # Add to annotation data
+            mask_data = {
+                "label": category_name,
+                "points": points,
+                "mask_path": mask_path
+            }
+            annotation_data["masks"].append(mask_data)
+    
+    # Save annotation data as JSON
+    with open(output_path, 'w') as f:
+        json.dump(annotation_data, f, indent=2)
+    
+    print(f"Saved annotation to {output_path}")
+
+
+def process_image(image_path, model, categories, output_dir, device, threshold=0.5, show=False, save_json=True):
     """
     Process a single image with the model
     
@@ -171,6 +263,7 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
         device: Device to run on
         threshold: Confidence threshold
         show: Whether to display results interactively
+        save_json: Whether to save annotation in JSON format
     """
     print(f"Processing image: {os.path.basename(image_path)}")
     
@@ -180,19 +273,26 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
     # Get prediction
     output = get_prediction(model, img_tensor, device, threshold)
     
-    # Prepare output path
+    # Prepare output paths
     if output_dir:
         base_name = os.path.basename(image_path)
-        output_path = os.path.join(output_dir, f"pred_{base_name}")
+        visualization_path = os.path.join(output_dir, f"pred_{base_name}")
+        json_path = os.path.join(output_dir, f"{os.path.splitext(base_name)[0]}_annotation.json")
     else:
-        output_path = None
+        visualization_path = None
+        json_path = None
     
     # Visualize prediction
-    visualize_prediction(original_image, output, categories, output_path)
+    visualize_prediction(original_image, output, categories, visualization_path)
+    
+    # Save annotation as JSON
+    if save_json and json_path:
+        width, height = original_image.size
+        save_annotations(image_path, height, width, output, categories, json_path)
     
     # Display if requested
-    if show and output_path:
-        img = Image.open(output_path)
+    if show and visualization_path:
+        img = Image.open(visualization_path)
         img.show()
     
     # Print detection summary
@@ -211,7 +311,7 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
 
 
 def process_video(video_path, model, categories, output_dir, device, threshold=0.5, fps=None, 
-                 show_progress=True, skip_frames=0):
+                 show_progress=True, skip_frames=0, save_json=True):
     """
     Process video with the model
     
@@ -225,6 +325,7 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
         fps: Output frames per second (default: same as input)
         show_progress: Whether to show progress bar
         skip_frames: Number of frames to skip between processing
+        save_json: Whether to save annotation in JSON format
     
     Returns:
         output_path: Path to output video
@@ -251,6 +352,11 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
     output_path = os.path.join(output_dir, f"pred_{os.path.basename(video_path)}")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # or 'avc1' for better quality
     out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
+    
+    # Create directory for frame annotations if saving JSON
+    frame_dir = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}_frames")
+    if save_json:
+        os.makedirs(frame_dir, exist_ok=True)
     
     # Process frames
     frame_count = 0
@@ -282,6 +388,20 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
         # Get prediction
         img_tensor = T.ToTensor()(image)
         output = get_prediction(model, img_tensor, device, threshold)
+        
+        # Save annotation as JSON
+        if save_json:
+            frame_name = f"frame_{frame_count:06d}"
+            json_path = os.path.join(frame_dir, f"{frame_name}_annotation.json")
+            frame_path = f"{os.path.basename(frame_dir)}/{frame_name}.jpg"
+            
+            # Save frame image
+            frame_img_path = os.path.join(output_dir, frame_path)
+            os.makedirs(os.path.dirname(frame_img_path), exist_ok=True)
+            cv2.imwrite(frame_img_path, cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+            
+            # Save annotation
+            save_annotations(frame_path, height, width, output, categories, json_path)
         
         # Create figure for visualization
         fig, ax = plt.subplots(1, figsize=(width/100, height/100), dpi=100)
@@ -410,7 +530,7 @@ def main(args):
     if args.input_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
         # Process video
         process_video(args.input_path, model, categories, args.output_dir, device, 
-                    args.threshold, args.fps, skip_frames=args.skip_frames)
+                    args.threshold, args.fps, skip_frames=args.skip_frames, save_json=not args.no_json)
     
     elif os.path.isdir(args.input_path):
         # Process all images in directory
@@ -427,7 +547,7 @@ def main(args):
         for image_path in image_paths:
             total_detections += process_image(
                 image_path, model, categories, args.output_dir, 
-                device, args.threshold, args.show
+                device, args.threshold, args.show, save_json=not args.no_json
             )
         
         end_time = time.time()
@@ -442,7 +562,7 @@ def main(args):
         # Process single image
         process_image(
             args.input_path, model, categories, args.output_dir, 
-            device, args.threshold, args.show
+            device, args.threshold, args.show, save_json=not args.no_json
         )
 
 
@@ -458,305 +578,7 @@ if __name__ == "__main__":
     parser.add_argument('--cpu', action='store_true', help='force CPU usage')
     parser.add_argument('--fps', type=float, default=None, help='output video fps (default: same as input)')
     parser.add_argument('--skip-frames', type=int, default=0, help='number of frames to skip (for faster video processing)')
-    
-    args = parser.parse_args()
-    main(args)
-import os
-import argparse
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import patches, patheffects
-from PIL import Image
-import torchvision.transforms as T
-import glob
-import time
-import cv2
-
-from model import get_model_instance_segmentation
-
-
-def load_model(model_path, num_classes):
-    """
-    Load a saved model from disk
-    
-    Args:
-        model_path (str): Path to the saved model file
-        num_classes (int): Number of classes in the model
-        
-    Returns:
-        model: Loaded PyTorch model
-    """
-    model = get_model_instance_segmentation(num_classes)
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    return model
-
-
-def load_image(image_path):
-    """
-    Load an image and convert to tensor
-    
-    Args:
-        image_path: Path to image file
-        
-    Returns:
-        image_tensor: Normalized image tensor [C, H, W]
-        original_image: PIL Image for visualization
-    """
-    original_image = Image.open(image_path).convert("RGB")
-    
-    # Convert to tensor and normalize
-    transform = T.Compose([
-        T.ToTensor(),
-    ])
-    
-    image_tensor = transform(original_image)
-    return image_tensor, original_image
-
-
-def get_prediction(model, image_tensor, device, threshold=0.5):
-    """
-    Get model prediction on an image
-    
-    Args:
-        model: PyTorch model
-        image_tensor: Input image tensor [C, H, W]
-        device: Device to run on
-        threshold: Confidence threshold
-        
-    Returns:
-        output: Filtered model output
-    """
-    # Move to device and add batch dimension
-    img = image_tensor.to(device)[None]
-    
-    # Get prediction
-    model.eval()
-    with torch.no_grad():
-        output = model(img)[0]
-    
-    # Filter by threshold
-    keep = output['scores'] > threshold
-    filtered_output = {
-        'boxes': output['boxes'][keep],
-        'labels': output['labels'][keep],
-        'scores': output['scores'][keep],
-        'masks': output['masks'][keep]
-    }
-    
-    return filtered_output
-
-
-def visualize_prediction(image, output, categories, output_path=None, show_masks=True, show_boxes=True):
-    """
-    Visualize model prediction on an image
-    
-    Args:
-        image: PIL Image
-        output: Model output dictionary
-        categories: List of category names
-        output_path: Path to save the visualization
-        show_masks: Whether to show segmentation masks
-        show_boxes: Whether to show bounding boxes
-    """
-    # Convert PIL Image to numpy array
-    image_np = np.array(image)
-    
-    # Create figure and axis
-    fig, ax = plt.subplots(1, figsize=(16, 10))
-    ax.imshow(image_np)
-    
-    # Get prediction components
-    boxes = output['boxes'].cpu().numpy()
-    labels = output['labels'].cpu().numpy()
-    scores = output['scores'].cpu().numpy()
-    masks = output['masks'].cpu().numpy() if 'masks' in output else None
-    
-    # Create colors for each class
-    colors = plt.cm.rainbow(np.linspace(0, 1, len(categories)))
-    
-    # Draw each detection
-    for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
-        # Get color for class
-        color = colors[label % len(colors)]
-        color_tuple = tuple(c * 255 for c in color[:3])
-        
-        # Class name
-        category_name = categories[label] if label < len(categories) else f"Class {label}"
-        label_text = f"{category_name}: {score:.2f}"
-        
-        # Draw bounding box
-        if show_boxes:
-            x1, y1, x2, y2 = box.astype(int)
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, edgecolor=color, facecolor='none')
-            ax.add_patch(rect)
-        
-        # Draw mask
-        if show_masks and masks is not None:
-            mask = masks[i, 0]
-            mask_color = np.array(color)
-            mask_binary = mask > 0.5
-            
-            # Create colored mask overlay
-            masked_image = image_np.copy()
-            for c in range(3):  # RGB channels
-                masked_image[:, :, c] = np.where(mask_binary, 
-                                               masked_image[:, :, c] * 0.5 + color_tuple[c] * 0.5, 
-                                               masked_image[:, :, c])
-            
-            # Blend with original image
-            alpha = 0.5
-            ax.imshow(np.where(mask_binary[:, :, None], masked_image, image_np), alpha=alpha)
-        
-        # Add label text
-        if show_boxes:
-            x1, y1, _, _ = box.astype(int)
-            text = ax.text(x1, y1-10, label_text, fontsize=12, color='white')
-            text.set_path_effects([patheffects.withStroke(linewidth=2, foreground='black')])
-    
-    # Remove axes
-    ax.axis('off')
-    
-    # Save or display figure
-    if output_path:
-        plt.savefig(output_path, bbox_inches='tight', dpi=100)
-        plt.close()
-    else:
-        plt.tight_layout()
-        plt.show()
-
-
-def process_image(image_path, model, categories, output_dir, device, threshold=0.5, show=False):
-    """
-    Process a single image with the model
-    
-    Args:
-        image_path: Path to image file
-        model: PyTorch model
-        categories: List of category names
-        output_dir: Directory to save results
-        device: Device to run on
-        threshold: Confidence threshold
-        show: Whether to display results interactively
-    """
-    # Load image
-    img_tensor, original_image = load_image(image_path)
-    
-    # Get prediction
-    output = get_prediction(model, img_tensor, device, threshold)
-    
-    # Prepare output path
-    if output_dir:
-        base_name = os.path.basename(image_path)
-        output_path = os.path.join(output_dir, f"pred_{base_name}")
-    else:
-        output_path = None
-    
-    # Visualize prediction
-    visualize_prediction(original_image, output, categories, output_path)
-    
-    # Display if requested
-    if show and output_path:
-        img = Image.open(output_path)
-        img.show()
-    
-    # Print detection summary
-    num_detections = len(output['boxes'])
-    print(f"Image: {os.path.basename(image_path)}")
-    print(f"Found {num_detections} objects above threshold {threshold}:")
-    
-    for i in range(num_detections):
-        label = output['labels'][i].item()
-        score = output['scores'][i].item()
-        category_name = categories[label] if label < len(categories) else f"Class {label}"
-        print(f"  {category_name}: {score:.3f}")
-    
-    print("")
-    
-    return num_detections
-
-
-def main(args):
-    # Set device
-    device = torch.device('cuda') if torch.cuda.is_available() and not args.cpu else torch.device('cpu')
-    print(f"Using device: {device}")
-    
-    # Load categories
-    categories = ['background']
-    if args.categories_file:
-        try:
-            with open(args.categories_file, 'r') as f:
-                categories = ['background'] + [line.strip() for line in f if line.strip()]
-            print(f"Loaded {len(categories)-1} categories from {args.categories_file}")
-        except Exception as e:
-            print(f"Error loading categories: {e}")
-            print("Using default 'background' category only")
-    elif args.categories:
-        categories = ['background'] + args.categories.split(',')
-        print(f"Using {len(categories)-1} categories from command line")
-    else:
-        print("Warning: No categories provided. Only 'background' will be used.")
-    
-    # Load model
-    num_classes = len(categories)
-    print(f"Loading model from {args.model_path} with {num_classes} classes")
-    
-    try:
-        model = load_model(args.model_path, num_classes)
-        model.to(device)
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return
-    
-    # Create output directory
-    if args.output_dir:
-        os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Process images
-    if os.path.isdir(args.input_path):
-        # Process all images in directory
-        image_paths = []
-        for ext in ['jpg', 'jpeg', 'png', 'bmp']:
-            image_paths.extend(glob.glob(os.path.join(args.input_path, f"*.{ext}")))
-            image_paths.extend(glob.glob(os.path.join(args.input_path, f"*.{ext.upper()}")))
-        
-        print(f"Found {len(image_paths)} images in {args.input_path}")
-        
-        total_detections = 0
-        start_time = time.time()
-        
-        for image_path in image_paths:
-            total_detections += process_image(
-                image_path, model, categories, args.output_dir, 
-                device, args.threshold, args.show
-            )
-        
-        end_time = time.time()
-        total_time = end_time - start_time
-        
-        print("\nSummary:")
-        print(f"Processed {len(image_paths)} images in {total_time:.2f} seconds")
-        print(f"Average time per image: {total_time/len(image_paths):.2f} seconds")
-        print(f"Total objects detected: {total_detections}")
-        
-    else:
-        # Process single image
-        process_image(
-            args.input_path, model, categories, args.output_dir, 
-            device, args.threshold, args.show
-        )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run inference with Mask R-CNN on images")
-    parser.add_argument('input_path', help='path to image or directory of images')
-    parser.add_argument('--model-path', required=True, help='path to model checkpoint')
-    parser.add_argument('--output-dir', default='./output', help='directory to save results')
-    parser.add_argument('--categories', default='', help='comma-separated list of category names')
-    parser.add_argument('--categories-file', default='', help='path to file with category names (one per line)')
-    parser.add_argument('--threshold', type=float, default=0.5, help='detection confidence threshold')
-    parser.add_argument('--show', action='store_true', help='display images after processing')
-    parser.add_argument('--cpu', action='store_true', help='force CPU usage')
+    parser.add_argument('--no-json', action='store_true', help='do not save annotation as JSON')
     
     args = parser.parse_args()
     main(args)
