@@ -23,7 +23,7 @@ def load_polygons_from_json(json_file_path):
     height = data.get('height')
     
     # Process each mask in the JSON
-    for mask in masks:
+    for mask_index, mask in enumerate(masks):
         label = mask.get('label')
         points = mask.get('points', [])
         
@@ -34,7 +34,8 @@ def load_polygons_from_json(json_file_path):
         if label not in polygons_by_label:
             polygons_by_label[label] = []
         
-        polygons_by_label[label].append(polygon_coords)
+        # Store the polygon with its index
+        polygons_by_label[label].append((mask_index, polygon_coords))
     
     return polygons_by_label, width, height
 
@@ -168,6 +169,7 @@ def get_pcd_dimensions(pcd_file_path):
 def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_dir):
     """
     Extract point clouds for each labeled object in the JSON and save them separately.
+    Each individual polygon (ROI) is saved as a separate PCD file.
     
     Args:
         pcd_file_path (str): Path to the organized PCD file
@@ -213,47 +215,44 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
     # Process each label and its polygons
     for label, polygons in polygons_by_label.items():
         print(f"Processing label: {label} with {len(polygons)} polygons...")
-        all_indices = []
+        
+        # Create a subdirectory for this label
+        label_dir = os.path.join(output_dir, label)
+        os.makedirs(label_dir, exist_ok=True)
         
         # Process each polygon for this label
-        for i, polygon_coords in enumerate(polygons):
+        for mask_index, polygon_coords in polygons:
             # Extract indices of points within this polygon
             indices = extract_points_in_polygon(points, width, height, polygon_coords)
-            print(f"  Polygon {i+1}: Found {len(indices)} points")
-            all_indices.extend(indices)
-        
-        # Remove duplicate indices
-        all_indices = list(set(all_indices))
-        
-        if all_indices:
-            # Extract the subset of points for this label
-            extracted_points = points[all_indices]
+            print(f"  Polygon {mask_index+1}: Found {len(indices)} points")
             
-            # Create a new point cloud with only these points
-            extracted_cloud = o3d.geometry.PointCloud()
-            extracted_cloud.points = o3d.utility.Vector3dVector(extracted_points)
-            
-            # Copy colors if available
-            if colors is not None:
-                extracted_colors = colors[all_indices]
-                extracted_cloud.colors = o3d.utility.Vector3dVector(extracted_colors)
-            
-            # Copy normals if available
-            if normals is not None:
-                extracted_normals = normals[all_indices]
-                extracted_cloud.normals = o3d.utility.Vector3dVector(extracted_normals)
-            
-            # Save the extracted point cloud with the label as filename
-            # Save as PCD to preserve organization information
-            output_file = os.path.join(output_dir, f"{label}.pcd")
-            
-            # Write the point cloud file
-            o3d.io.write_point_cloud(output_file, extracted_cloud)
-            
-            print(f"Extracted {len(all_indices)} total points for {label}")
-            print(f"Saved to {output_file}")
-        else:
-            print(f"No points found for {label}")
+            if indices:
+                # Extract the subset of points for this specific polygon
+                extracted_points = points[indices]
+                
+                # Create a new point cloud with only these points
+                extracted_cloud = o3d.geometry.PointCloud()
+                extracted_cloud.points = o3d.utility.Vector3dVector(extracted_points)
+                
+                # Copy colors if available
+                if colors is not None:
+                    extracted_colors = colors[indices]
+                    extracted_cloud.colors = o3d.utility.Vector3dVector(extracted_colors)
+                
+                # Copy normals if available
+                if normals is not None:
+                    extracted_normals = normals[indices]
+                    extracted_cloud.normals = o3d.utility.Vector3dVector(extracted_normals)
+                
+                # Save the extracted point cloud with the label and polygon index as filename
+                output_file = os.path.join(label_dir, f"{label}_roi_{mask_index}.pcd")
+                
+                # Write the point cloud file
+                o3d.io.write_point_cloud(output_file, extracted_cloud)
+                
+                print(f"  Saved polygon {mask_index} with {len(indices)} points to {output_file}")
+            else:
+                print(f"  No points found for polygon {mask_index}")
     
     print("Processing complete.")
 
@@ -273,7 +272,7 @@ def main():
     args = parser.parse_args()
     
     # Extract and save point clouds for each labeled object
-    extract_and_save_labeled_point_clouds(args.pcd, args.json, args.output, verify=not args.no_verify)
+    extract_and_save_labeled_point_clouds(args.pcd, args.json, args.output)
 
 if __name__ == "__main__":
     main()

@@ -52,7 +52,7 @@ def load_image(image_path):
     return image_tensor, original_image
 
 
-def get_prediction(model, image_tensor, device, threshold=0.5):
+def get_prediction(model, image_tensor, device, threshold=0.3):
     """
     Get model prediction on an image
     
@@ -160,6 +160,81 @@ def visualize_prediction(image, output, categories, output_path=None, show_masks
         plt.show()
 
 
+def save_rgb_annotated_image(original_image, output, categories, output_path):
+    """
+    Save annotations directly on the RGB image
+    
+    Args:
+        original_image: PIL Image
+        output: Model output dictionary
+        categories: List of category names
+        output_path: Path to save the annotated RGB image
+    """
+    # Convert PIL Image to OpenCV format (RGB to BGR)
+    image_cv = np.array(original_image)
+    image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
+    
+    # Get prediction components
+    boxes = output['boxes'].cpu().numpy()
+    labels = output['labels'].cpu().numpy()
+    scores = output['scores'].cpu().numpy()
+    masks = output['masks'].cpu().numpy() if 'masks' in output else None
+    
+    # Create colors for each class
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(categories)))
+    
+    # Apply masks to the original image
+    if masks is not None:
+        # Create a copy for the mask overlay
+        mask_overlay = image_cv.copy()
+        
+        for i, (mask, label) in enumerate(zip(masks, labels)):
+            # Get color for class
+            color = colors[label % len(colors)]
+            color_bgr = (int(color[2]*255), int(color[1]*255), int(color[0]*255))  # RGB to BGR
+            
+            # Create binary mask
+            mask_binary = (mask[0] > 0.5).astype(np.uint8)
+            
+            # Apply colored mask
+            mask_overlay[mask_binary == 1] = cv2.addWeighted(
+                mask_overlay[mask_binary == 1], 
+                0.5,  # Alpha for original image
+                np.full_like(mask_overlay[mask_binary == 1], color_bgr),
+                0.5,  # Alpha for color
+                0
+            )
+        
+        # Blend mask overlay with original
+        image_cv = mask_overlay
+    
+    # Draw bounding boxes and labels
+    for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
+        # Get color for class
+        color = colors[label % len(colors)]
+        color_bgr = (int(color[2]*255), int(color[1]*255), int(color[0]*255))  # RGB to BGR
+        
+        # Draw bounding box
+        x1, y1, x2, y2 = box.astype(int)
+        cv2.rectangle(image_cv, (x1, y1), (x2, y2), color_bgr, 2)
+        
+        # Class name and score
+        category_name = categories[label] if label < len(categories) else f"Class {label}"
+        label_text = f"{category_name}: {score:.2f}"
+        
+        # Add label text with background
+        # Get text size
+        text_size, baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+        # Create a rectangle for text background
+        cv2.rectangle(image_cv, (x1, y1-text_size[1]-10), (x1+text_size[0], y1), color_bgr, -1)
+        # Add text
+        cv2.putText(image_cv, label_text, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    
+    # Save the annotated image
+    cv2.imwrite(output_path, image_cv)
+    print(f"Saved RGB annotated image to {output_path}")
+
+
 def mask_to_points(mask):
     """
     Convert binary mask to list of contour points
@@ -201,6 +276,7 @@ def save_annotations(image_path, height, width, output, categories, output_path)
         output_path: Path to save the annotation JSON
     """
     # Get prediction components
+    boxes = output['boxes'].cpu().numpy()
     labels = output['labels'].cpu().numpy()
     masks = output['masks'].cpu().numpy() if 'masks' in output else None
     
@@ -220,11 +296,11 @@ def save_annotations(image_path, height, width, output, categories, output_path)
     if masks is not None:
         base_name = os.path.basename(image_path).split('.')[0]
         
-        for i, (mask, label) in enumerate(zip(masks, labels)):
+        for i, (mask, box, label) in enumerate(zip(masks, boxes, labels)):
             # Get category name
             category_name = categories[label] if label < len(categories) else f"Class_{label}"
             
-            # Convert mask to points
+            # Convert mask to points (polygon)
             points = mask_to_points(mask[0])
             
             if not points:
@@ -236,11 +312,27 @@ def save_annotations(image_path, height, width, output, categories, output_path)
             mask_img = (mask[0] > 0.5).astype(np.uint8) * 255
             cv2.imwrite(full_mask_path, mask_img)
             
+            # Calculate bounding box center
+            x1, y1, x2, y2 = box.astype(int)
+            bbox_center = [int((x1 + x2) / 2), int((y1 + y2) / 2)]
+            
+            # Calculate geometric center (centroid) of polygon
+            if points:
+                points_array = np.array(points)
+                centroid_x = np.mean(points_array[:, 0])
+                centroid_y = np.mean(points_array[:, 1])
+                geometric_center = [int(centroid_x), int(centroid_y)]
+            else:
+                geometric_center = bbox_center  # Fallback if no polygon points
+            
             # Add to annotation data
             mask_data = {
                 "label": category_name,
                 "points": points,
-                "mask_path": mask_path
+                "mask_path": mask_path,
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "bbox_center": bbox_center,
+                "geometric_center": geometric_center
             }
             annotation_data["masks"].append(mask_data)
     
@@ -277,13 +369,19 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
     if output_dir:
         base_name = os.path.basename(image_path)
         visualization_path = os.path.join(output_dir, f"pred_{base_name}")
+        rgb_annotated_path = os.path.join(output_dir, f"rgb_annotated_{base_name}")
         json_path = os.path.join(output_dir, f"{os.path.splitext(base_name)[0]}_annotation.json")
     else:
         visualization_path = None
+        rgb_annotated_path = None
         json_path = None
     
     # Visualize prediction
     visualize_prediction(original_image, output, categories, visualization_path)
+    
+    # Save annotated RGB image
+    if rgb_annotated_path:
+        save_rgb_annotated_image(original_image, output, categories, rgb_annotated_path)
     
     # Save annotation as JSON
     if save_json and json_path:
@@ -348,10 +446,12 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
     print(f"  Frames: {total_frames}")
     print(f"  FPS: {input_fps}")
     
-    # Create output video
+    # Create output videos
     output_path = os.path.join(output_dir, f"pred_{os.path.basename(video_path)}")
+    output_rgb_path = os.path.join(output_dir, f"rgb_annotated_{os.path.basename(video_path)}")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # or 'avc1' for better quality
     out = cv2.VideoWriter(output_path, fourcc, output_fps, (width, height))
+    out_rgb = cv2.VideoWriter(output_rgb_path, fourcc, output_fps, (width, height))
     
     # Create directory for frame annotations if saving JSON
     frame_dir = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}_frames")
@@ -403,7 +503,7 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
             # Save annotation
             save_annotations(frame_path, height, width, output, categories, json_path)
         
-        # Create figure for visualization
+        # Create figure for visualization with masks
         fig, ax = plt.subplots(1, figsize=(width/100, height/100), dpi=100)
         ax.imshow(image)
         
@@ -465,8 +565,51 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
         # Resize to original dimensions
         frame_with_detections = cv2.resize(frame_with_detections, (width, height))
         
-        # Write to output video
+        # Write to masked output video
         out.write(frame_with_detections)
+        
+        # Create annotated RGB frame and save to video
+        frame_copy = frame.copy()  # Work with original BGR frame
+        
+        # Apply masks to the original image
+        if masks is not None:
+            for i, (mask, label) in enumerate(zip(masks, labels)):
+                # Get color for class
+                color = colors[label % len(colors)]
+                color_bgr = (int(color[2]*255), int(color[1]*255), int(color[0]*255))  # RGB to BGR
+                
+                # Create binary mask
+                mask_binary = (mask[0] > 0.5).astype(np.uint8)
+                
+                # Apply colored mask with alpha blending
+                for c in range(3):  # Apply to each color channel
+                    frame_copy[:, :, c] = np.where(
+                        mask_binary == 1,
+                        frame_copy[:, :, c] * 0.5 + color_bgr[c] * 0.5,
+                        frame_copy[:, :, c]
+                    )
+        
+        # Draw bounding boxes and labels
+        for i, (box, label, score) in enumerate(zip(boxes, labels, scores)):
+            # Get color for class
+            color = colors[label % len(colors)]
+            color_bgr = (int(color[2]*255), int(color[1]*255), int(color[0]*255))  # RGB to BGR
+            
+            # Draw bounding box
+            x1, y1, x2, y2 = box.astype(int)
+            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color_bgr, 2)
+            
+            # Class name and score
+            category_name = categories[label] if label < len(categories) else f"Class {label}"
+            label_text = f"{category_name}: {score:.2f}"
+            
+            # Add label text with background
+            text_size, baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            cv2.rectangle(frame_copy, (x1, y1-text_size[1]-10), (x1+text_size[0], y1), color_bgr, -1)
+            cv2.putText(frame_copy, label_text, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+        # Write to RGB annotated video
+        out_rgb.write(frame_copy)
         
         # Clean up
         plt.close(fig)
@@ -479,15 +622,17 @@ def process_video(video_path, model, categories, output_dir, device, threshold=0
     # Clean up
     cap.release()
     out.release()
+    out_rgb.release()
     
     if show_progress:
         pbar.close()
     
     print(f"Video processing complete:")
     print(f"  Processed {processed_count}/{total_frames} frames")
-    print(f"  Output saved to {output_path}")
+    print(f"  Masked output saved to {output_path}")
+    print(f"  RGB annotated output saved to {output_rgb_path}")
     
-    return output_path
+    return output_path, output_rgb_path
 
 
 def main(args):
@@ -573,7 +718,7 @@ if __name__ == "__main__":
     parser.add_argument('--output-dir', default='./output', help='directory to save results')
     parser.add_argument('--categories', default='', help='comma-separated list of category names')
     parser.add_argument('--categories-file', default='', help='path to file with category names (one per line)')
-    parser.add_argument('--threshold', type=float, default=0.5, help='detection confidence threshold')
+    parser.add_argument('--threshold', type=float, default=0.3, help='detection confidence threshold')
     parser.add_argument('--show', action='store_true', help='display images after processing')
     parser.add_argument('--cpu', action='store_true', help='force CPU usage')
     parser.add_argument('--fps', type=float, default=None, help='output video fps (default: same as input)')

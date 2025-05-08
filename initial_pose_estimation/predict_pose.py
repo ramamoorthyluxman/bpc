@@ -126,9 +126,9 @@ def visualize_axes(image, rotation_matrix, axis_length=50, thickness=2):
     
     return image
 
-def display_result(image_path, rotation_matrix):
+def display_result_with_path(image_path, rotation_matrix, save_path=None):
     """
-    Display the input image and visualize the rotation
+    Display the input image and visualize the rotation with custom save path
     """
     # Load original image
     original_image = Image.open(image_path).convert('RGB')
@@ -156,10 +156,8 @@ def display_result(image_path, rotation_matrix):
     
     plt.tight_layout()
     
-    # Save the figure if needed
-    if args.save_visualization:
-        base_name = os.path.splitext(os.path.basename(image_path))[0]
-        save_path = os.path.join(args.output_dir, f"{base_name}_prediction.png")
+    # Save the figure if a path is provided
+    if save_path:
         plt.savefig(save_path)
         print(f"Visualization saved to {save_path}")
     
@@ -168,7 +166,7 @@ def display_result(image_path, rotation_matrix):
 
 def main(args):
     # Create output directory if needed
-    if args.save_visualization:
+    if args.save_visualization or args.save_results:
         os.makedirs(args.output_dir, exist_ok=True)
     
     # Set device
@@ -200,6 +198,14 @@ def main(args):
         
         print(f"Processing image: {image_path}")
         
+        # Extract image name without extension for subfolder creation
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        
+        # Create subfolder in output directory named after the image
+        image_output_dir = os.path.join(args.output_dir, base_name)
+        os.makedirs(image_output_dir, exist_ok=True)
+        print(f"Created result directory: {image_output_dir}")
+        
         # Load and transform image
         image = load_image(image_path, transform)
         
@@ -215,12 +221,17 @@ def main(args):
         
         # Display results
         if args.display or args.save_visualization:
-            display_result(image_path, rotation_matrix)
+            # Update save path for visualization to use the image-specific subfolder
+            if args.save_visualization:
+                save_path = os.path.join(image_output_dir, f"{base_name}_prediction.png")
+                display_result_with_path(image_path, rotation_matrix, save_path)
+            else:
+                display_result(image_path, rotation_matrix)
         
         # Save rotation matrix to file if requested
         if args.save_results:
-            base_name = os.path.splitext(os.path.basename(image_path))[0]
-            save_path = os.path.join(args.output_dir, f"{base_name}_rotation.txt")
+            # Use the image-specific subfolder
+            save_path = os.path.join(image_output_dir, f"{base_name}_rotation.txt")
             np.savetxt(save_path, rotation_matrix, fmt='%.6f')
             print(f"Rotation matrix saved to {save_path}")
 
