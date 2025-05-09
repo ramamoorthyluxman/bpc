@@ -9,10 +9,10 @@ import os
 import argparse
 import sys
 
-class PointCloudRegistration:
-    def __init__(self, use_visualization=False):
+class PointCloudProcessing:
+    def __init__(self):
         # Parameters for preprocessing
-        self.voxel_size = 0.01  # Downsampling voxel size
+        self.voxel_size = 0.01  # Downsampling voxel size for registration
         self.nb_neighbors = 20  # Neighbors for normal estimation
         self.std_ratio = 2.0    # Standard deviation ratio for outlier removal
         
@@ -28,35 +28,89 @@ class PointCloudRegistration:
         self.fitness_history = []
         self.rmse_history = []
         
-        # Visualization settings
-        self.use_visualization = use_visualization
-        self.vis = None
-        self.source_temp = None  # For visualization updates
+        # Parameters for placement
+        self.max_scene_points = 50000  # Maximum number of points in scene after downsampling
         
         # Output directory
         self.output_dir = 'registration_results'
         os.makedirs(self.output_dir, exist_ok=True)
-        
-    def load_point_clouds(self, source_file, target_file):
-        """Load source (PCD) and target (PLY) point clouds"""
-        print(f"Loading source point cloud: {source_file}")
-        print(f"Loading target point cloud: {target_file}")
-        
-        # Determine file type and load accordingly
+    
+    # ============ LOADING AND PREPROCESSING ============
+    
+    def load_point_clouds(self, source_file, reference_file, scene_file=None):
+        """Load all point clouds"""
+        print(f"Loading source point cloud (ROI): {source_file}")
         if source_file.endswith('.pcd'):
             source = o3d.io.read_point_cloud(source_file)
         else:
             raise ValueError("Source file must be a PCD file")
-            
-        if target_file.endswith('.ply'):
-            target = o3d.io.read_point_cloud(target_file)
-        else:
-            raise ValueError("Target file must be a PLY file")
-            
-        print(f"Source point cloud has {len(source.points)} points")
-        print(f"Target point cloud has {len(target.points)} points")
         
-        return source, target
+        print(f"Loading reference model: {reference_file}")
+        if reference_file.endswith('.ply'):
+            reference = o3d.io.read_point_cloud(reference_file)
+        else:
+            raise ValueError("Reference file must be a PLY file")
+        
+        # Check if scene file is provided
+        if scene_file:
+            print(f"Loading scene point cloud: {scene_file}")
+            if scene_file.endswith('.pcd'):
+                scene = o3d.io.read_point_cloud(scene_file)
+            else:
+                raise ValueError("Scene file must be a PCD file")
+            print(f"Scene point cloud has {len(scene.points)} points")
+        else:
+            scene = None
+        
+        print(f"Source point cloud has {len(source.points)} points")
+        print(f"Reference model has {len(reference.points)} points")
+        
+        return source, reference, scene
+    
+    def adaptive_downsample_point_cloud(self, pcd, target_points, name="point cloud"):
+        """Downsample point cloud to approximately target_points"""
+        original_points = len(pcd.points)
+        print(f"Adaptively downsampling {name} from {original_points} points to ~{target_points} points")
+        
+        if original_points <= target_points:
+            print(f"No downsampling needed, {name} already has fewer points than target")
+            return copy.deepcopy(pcd)
+        
+        # Calculate voxel size to achieve approximately target_points
+        # This is an approximation based on uniform distribution assumption
+        estimated_voxel_size = (original_points / target_points) ** (1/3) * 0.01
+        
+        # Start with estimated voxel size
+        voxel_size = estimated_voxel_size
+        downsampled = pcd.voxel_down_sample(voxel_size)
+        current_points = len(downsampled.points)
+        
+        # Binary search to find better voxel size if estimation is far off
+        if abs(current_points - target_points) > 0.2 * target_points:
+            min_voxel = 0.001
+            max_voxel = 0.5
+            
+            if current_points > target_points:
+                min_voxel = voxel_size
+            else:
+                max_voxel = voxel_size
+            
+            # Binary search with max 10 iterations
+            for _ in range(10):
+                voxel_size = (min_voxel + max_voxel) / 2
+                downsampled = pcd.voxel_down_sample(voxel_size)
+                current_points = len(downsampled.points)
+                
+                if abs(current_points - target_points) < 0.1 * target_points:
+                    break
+                
+                if current_points > target_points:
+                    min_voxel = voxel_size
+                else:
+                    max_voxel = voxel_size
+        
+        print(f"Downsampled {name} to {len(downsampled.points)} points using voxel size {voxel_size:.6f}")
+        return downsampled
     
     def preprocess_point_cloud(self, pcd, name="point cloud"):
         """Preprocess point cloud: downsampling, normal estimation, outlier removal"""
@@ -69,9 +123,12 @@ class PointCloudRegistration:
         if len(processed.points) == 0:
             raise ValueError(f"Empty {name}")
         
+        # Store original center
+        original_center = np.mean(np.asarray(processed.points), axis=0)
+        
         # Center the point cloud
         processed.points = o3d.utility.Vector3dVector(
-            np.asarray(processed.points) - np.mean(np.asarray(processed.points), axis=0))
+            np.asarray(processed.points) - original_center)
         
         # Scale normalization
         points = np.asarray(processed.points)
@@ -97,7 +154,9 @@ class PointCloudRegistration:
         features = o3d.pipelines.registration.compute_fpfh_feature(
             cleaned, o3d.geometry.KDTreeSearchParamHybrid(radius=self.voxel_size * 5, max_nn=100))
         
-        return cleaned, features, scale
+        return cleaned, features, scale, original_center
+    
+    # ============ REGISTRATION ============
     
     def execute_global_registration(self, source, target, source_feat, target_feat):
         """Perform global registration using RANSAC"""
@@ -122,9 +181,9 @@ class PointCloudRegistration:
         print(f"RANSAC RMSE: {result.inlier_rmse}")
         
         # Save initial transformation to history
-        self.transformation_history.append(result.transformation)
-        self.fitness_history.append(result.fitness)
-        self.rmse_history.append(result.inlier_rmse)
+        self.transformation_history = [result.transformation]
+        self.fitness_history = [result.fitness]
+        self.rmse_history = [result.inlier_rmse]
         
         return result.transformation
         
@@ -240,6 +299,60 @@ class PointCloudRegistration:
         plt.savefig(f'{self.output_dir}/transformation_evolution.png')
         print(f"Transformation evolution saved to {self.output_dir}/transformation_evolution.png")
     
+    # ============ MODEL PLACEMENT ============
+    
+    def place_reference_in_scene(self, reference, scene, transformation_src_to_ref, source_center, reference_center):
+        """Place reference model in scene using the inverse transformation with correct centering"""
+        print("Placing reference model in scene...")
+        
+        # Calculate inverse transformation (reference to source)
+        transformation_ref_to_src = np.linalg.inv(transformation_src_to_ref)
+        
+        # Adjust transformation to account for centering
+        # Create translation matrices for the centers
+        T_src = np.eye(4)
+        T_src[:3, 3] = source_center
+        
+        T_ref = np.eye(4)
+        T_ref[:3, 3] = -reference_center
+        
+        # The complete transformation: T_src * T_ref_to_src * T_ref
+        adjusted_transform = np.matmul(T_src, np.matmul(transformation_ref_to_src, T_ref))
+        
+        # Apply transformation to reference
+        reference_in_scene = copy.deepcopy(reference)
+        reference_in_scene.transform(adjusted_transform)
+        
+        # Color the reference model with a distinct bright color
+        reference_in_scene.paint_uniform_color([1, 0.3, 0])  # Bright orange-red
+        
+        # Create a combined point cloud
+        # First, make a copy of the scene to preserve its RGB information
+        scene_copy = copy.deepcopy(scene)
+        
+        # Combine reference and scene
+        combined = copy.deepcopy(reference_in_scene)
+        combined.points = o3d.utility.Vector3dVector(
+            np.vstack((np.asarray(reference_in_scene.points), np.asarray(scene_copy.points))))
+        
+        # Combine colors - keeping original scene colors
+        if len(scene_copy.colors) > 0:
+            combined.colors = o3d.utility.Vector3dVector(
+                np.vstack((np.asarray(reference_in_scene.colors), np.asarray(scene_copy.colors))))
+        
+        return reference_in_scene, combined, adjusted_transform
+    
+    def save_results(self, reference_in_scene, scene, combined):
+        """Save placement results"""
+        print("Saving results...")
+        
+        # Save individual point clouds
+        o3d.io.write_point_cloud(f'{self.output_dir}/reference_in_scene.pcd', reference_in_scene)
+        o3d.io.write_point_cloud(f'{self.output_dir}/scene.pcd', scene)
+        o3d.io.write_point_cloud(f'{self.output_dir}/combined_result.pcd', combined)
+        
+        print(f"Results saved to {self.output_dir}/")
+    
     def create_off_screen_renderer(self, width=1280, height=720):
         """Creates an off-screen renderer for Open3D visualization"""
         render = o3d.visualization.rendering.OffscreenRenderer(width, height)
@@ -256,34 +369,16 @@ class PointCloudRegistration:
         
         # Add geometries to the scene
         for i, geom in enumerate(geometries):
-            if isinstance(geom, o3d.geometry.PointCloud):
-                # Convert point cloud to triangle mesh for better rendering
-                # Use ball pivoting or Poisson reconstruction depending on normals
-                if len(geom.normals) > 0:
-                    mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(geom, depth=5)
-                    material = o3d.visualization.rendering.MaterialRecord()
-                    material.shader = "defaultLit"
-                    
-                    # Use the same colors as the point cloud
-                    if len(geom.colors) > 0:
-                        mesh.vertex_colors = geom.colors
-                        
-                    renderer.scene.add_geometry(f"mesh_{i}", mesh, material)
-                else:
-                    material = o3d.visualization.rendering.MaterialRecord()
-                    material.shader = "defaultLit"
-                    material.point_size = 3.0
-                    
-                    # Set material color if point cloud has colors
-                    if len(geom.colors) > 0:
-                        first_color = np.asarray(geom.colors)[0]
-                        material.base_color = [first_color[0], first_color[1], first_color[2], 1.0]
-                    
-                    renderer.scene.add_geometry(f"pointcloud_{i}", geom, material)
-            else:
-                material = o3d.visualization.rendering.MaterialRecord()
-                material.shader = "defaultLit"
-                renderer.scene.add_geometry(f"geometry_{i}", geom, material)
+            material = o3d.visualization.rendering.MaterialRecord()
+            material.shader = "defaultLit"
+            material.point_size = 5.0  # Larger point size for better visibility
+            
+            # Set material color if point cloud has colors
+            if len(geom.colors) > 0:
+                first_color = np.asarray(geom.colors)[0]
+                material.base_color = [first_color[0], first_color[1], first_color[2], 1.0]
+            
+            renderer.scene.add_geometry(f"pointcloud_{i}", geom, material)
         
         # Set up camera
         camera = o3d.visualization.rendering.Camera("perspective")
@@ -302,460 +397,87 @@ class PointCloudRegistration:
         
         return img
     
-    def create_2d_projection_visualizations(self, source, target, source_transformed):
-        """Create 2D projections of point clouds for easy comparison"""
-        print("Creating 2D projection visualizations...")
+    def create_visualizations(self, reference_in_scene, scene_downsampled):
+        """Create visualizations of the placement result"""
+        print("Creating visualizations...")
         
-        # Convert to numpy arrays
-        source_pts = np.asarray(source.points)
-        target_pts = np.asarray(target.points)
-        transformed_pts = np.asarray(source_transformed.points)
-        
-        # Sample points if there are too many (for clearer visualization)
-        max_points = 5000
-        if len(source_pts) > max_points:
-            idx = np.random.choice(len(source_pts), max_points, replace=False)
-            source_pts = source_pts[idx]
-        if len(transformed_pts) > max_points:
-            idx = np.random.choice(len(transformed_pts), max_points, replace=False)
-            transformed_pts = transformed_pts[idx]
-        if len(target_pts) > max_points:
-            idx = np.random.choice(len(target_pts), max_points, replace=False)
-            target_pts = target_pts[idx]
-        
-        # Create figure for 3 projections (XY, XZ, YZ), before and after registration
-        plt.figure(figsize=(18, 12))
-        
-        # Define projection planes
-        projections = [
-            {'indices': [0, 1], 'title': 'XY Projection', 'labels': ['X', 'Y']},
-            {'indices': [0, 2], 'title': 'XZ Projection', 'labels': ['X', 'Z']},
-            {'indices': [1, 2], 'title': 'YZ Projection', 'labels': ['Y', 'Z']}
-        ]
-        
-        # Plot each projection
-        for i, proj in enumerate(projections):
-            idx1, idx2 = proj['indices']
-            
-            # Before registration (source vs target)
-            plt.subplot(2, 3, i+1)
-            plt.scatter(source_pts[:, idx1], source_pts[:, idx2], c='red', marker='.', s=1, alpha=0.5, label='Source')
-            plt.scatter(target_pts[:, idx1], target_pts[:, idx2], c='blue', marker='.', s=1, alpha=0.5, label='Target')
-            plt.title(f"{proj['title']} - Before Registration")
-            plt.xlabel(proj['labels'][0])
-            plt.ylabel(proj['labels'][1])
-            plt.grid(True)
-            plt.legend()
-            
-            # After registration (transformed source vs target)
-            plt.subplot(2, 3, i+4)
-            plt.scatter(transformed_pts[:, idx1], transformed_pts[:, idx2], c='green', marker='.', s=1, alpha=0.5, label='Transformed Source')
-            plt.scatter(target_pts[:, idx1], target_pts[:, idx2], c='blue', marker='.', s=1, alpha=0.5, label='Target')
-            plt.title(f"{proj['title']} - After Registration")
-            plt.xlabel(proj['labels'][0])
-            plt.ylabel(proj['labels'][1])
-            plt.grid(True)
-            plt.legend()
-        
-        plt.tight_layout()
-        plt.savefig(f'{self.output_dir}/2d_projections.png', dpi=300)
-        print(f"2D projections saved to {self.output_dir}/2d_projections.png")
-    
-    def save_3d_visualizations(self, source, target, source_transformed):
-        """Save 3D visualizations of the point clouds before and after registration"""
         try:
-            print("Creating 3D visualizations...")
-            
-            # Prepare colored point clouds
-            source_vis = copy.deepcopy(source)
-            source_vis.paint_uniform_color([1, 0, 0])  # Red
-            
-            target_vis = copy.deepcopy(target)
-            target_vis.paint_uniform_color([0, 0, 1])  # Blue
-            
-            source_transformed_vis = copy.deepcopy(source_transformed)
-            source_transformed_vis.paint_uniform_color([0, 1, 0])  # Green
-            
-            # Create coordinate frames
-            frame_size = 0.1
-            source_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=frame_size)
-            target_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=frame_size)
-            source_transformed_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=frame_size)
-            
-            # Create combined point clouds
-            combined_before = copy.deepcopy(source_vis)
-            combined_before.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(source_vis.points), np.asarray(target_vis.points))))
-            combined_before.colors = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(source_vis.colors), np.asarray(target_vis.colors))))
-            
-            combined_after = copy.deepcopy(source_transformed_vis)
-            combined_after.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(source_transformed_vis.points), np.asarray(target_vis.points))))
-            combined_after.colors = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(source_transformed_vis.colors), np.asarray(target_vis.colors))))
-            
             # Try to use off-screen rendering for 3D views
-            try:
-                renderer = self.create_off_screen_renderer()
+            renderer = self.create_off_screen_renderer()
+            
+            # Define camera positions for multiple views
+            camera_positions = [
+                {"pos": [1, 1, 1], "name": "isometric"},
+                {"pos": [1, 0, 0], "name": "right"},
+                {"pos": [0, 1, 0], "name": "top"},
+                {"pos": [0, 0, 1], "name": "front"}
+            ]
+            
+            # Create directory for 3D views
+            os.makedirs(f'{self.output_dir}/views', exist_ok=True)
+            
+            # Calculate center of reference model for focus
+            ref_center = np.mean(np.asarray(reference_in_scene.points), axis=0)
+            
+            # Render views of placement result
+            for cam in camera_positions:
+                self.render_point_cloud_view(
+                    renderer, [reference_in_scene, scene_downsampled],
+                    camera_position=[pos * 2 for pos in cam["pos"]],  # Scale to ensure good view
+                    look_at=ref_center,
+                    filename=f'{self.output_dir}/views/placement_{cam["name"]}.png'
+                )
                 
-                # Define camera positions for multiple views
-                camera_positions = [
-                    {"pos": [1, 1, 1], "name": "isometric"},
-                    {"pos": [1, 0, 0], "name": "right"},
-                    {"pos": [0, 1, 0], "name": "top"},
-                    {"pos": [0, 0, 1], "name": "front"}
-                ]
-                
-                # Render source point cloud
-                os.makedirs(f'{self.output_dir}/3d_views', exist_ok=True)
-                
-                # Render before registration views
-                for cam in camera_positions:
-                    self.render_point_cloud_view(
-                        renderer, [source_vis, target_vis, source_frame, target_frame],
-                        camera_position=cam["pos"],
-                        filename=f'{self.output_dir}/3d_views/before_registration_{cam["name"]}.png'
-                    )
-                
-                # Render after registration views
-                for cam in camera_positions:
-                    self.render_point_cloud_view(
-                        renderer, [source_transformed_vis, target_vis, source_transformed_frame, target_frame],
-                        camera_position=cam["pos"],
-                        filename=f'{self.output_dir}/3d_views/after_registration_{cam["name"]}.png'
-                    )
-                
-                print(f"3D visualizations saved to {self.output_dir}/3d_views/")
-            except Exception as e:
-                print(f"Warning: Off-screen rendering failed: {str(e)}")
-                print("Falling back to saving point clouds as PLY files...")
-                
-                # Save as PLY files if rendering fails
-                o3d.io.write_point_cloud(f'{self.output_dir}/source.ply', source_vis)
-                o3d.io.write_point_cloud(f'{self.output_dir}/target.ply', target_vis)
-                o3d.io.write_point_cloud(f'{self.output_dir}/source_transformed.ply', source_transformed_vis)
-                o3d.io.write_point_cloud(f'{self.output_dir}/combined_before.ply', combined_before)
-                o3d.io.write_point_cloud(f'{self.output_dir}/combined_after.ply', combined_after)
-                
-                print(f"Point clouds saved as PLY files in {self.output_dir}/")
-        
-        except Exception as e:
-            print(f"Error in 3D visualization: {str(e)}")
-    
-    def create_registration_error_visualization(self, source_transformed, target):
-        """Create visualization showing point-wise registration error"""
-        print("Creating error visualization...")
-        
-        # Convert to numpy arrays
-        source_pts = np.asarray(source_transformed.points)
-        target_pts = np.asarray(target.points)
-        
-        try:
-            # Build a kd-tree for target points
-            tree = NearestNeighbors(n_neighbors=1, algorithm='kd_tree').fit(target_pts)
+                # Also render close-up of reference in scene
+                self.render_point_cloud_view(
+                    renderer, [reference_in_scene, scene_downsampled],
+                    camera_position=[ref_center[i] + cam["pos"][i] * 0.5 for i in range(3)],  # Closer view
+                    look_at=ref_center,
+                    filename=f'{self.output_dir}/views/placement_closeup_{cam["name"]}.png'
+                )
             
-            # Find the nearest target point for each source point
-            distances, _ = tree.kneighbors(source_pts)
-            distances = distances.flatten()
-            
-            # Create colored point cloud for visualization
-            error_vis = copy.deepcopy(source_transformed)
-            
-            # Create a color map from blue (good) to red (bad)
-            # Normalize distances
-            max_dist = np.percentile(distances, 95)  # Use 95th percentile to avoid outliers
-            normalized_distances = np.clip(distances / max_dist, 0, 1)
-            
-            # Create colors (blue for good alignment, red for poor alignment)
-            colors = np.zeros((len(normalized_distances), 3))
-            colors[:, 0] = normalized_distances  # Red channel (high for poor alignment)
-            colors[:, 2] = 1 - normalized_distances  # Blue channel (high for good alignment)
-            
-            # Apply colors to the point cloud
-            error_vis.colors = o3d.utility.Vector3dVector(colors)
-            
-            # Save the error visualization
-            o3d.io.write_point_cloud(f'{self.output_dir}/registration_error.ply', error_vis)
-            
-            # Plot histogram of distances
-            plt.figure(figsize=(10, 6))
-            plt.hist(distances, bins=50, color='blue', alpha=0.7)
-            plt.axvline(x=np.mean(distances), color='r', linestyle='--', label=f'Mean: {np.mean(distances):.4f}')
-            plt.axvline(x=np.median(distances), color='g', linestyle='--', label=f'Median: {np.median(distances):.4f}')
-            plt.xlabel('Distance to Nearest Target Point')
-            plt.ylabel('Frequency')
-            plt.title('Distribution of Registration Errors')
-            plt.grid(True)
-            plt.legend()
-            plt.savefig(f'{self.output_dir}/error_histogram.png')
-            
-            print(f"Error visualization saved to {self.output_dir}/registration_error.ply")
-            print(f"Error histogram saved to {self.output_dir}/error_histogram.png")
-            
-            # Return error statistics
-            error_stats = {
-                'mean': np.mean(distances),
-                'median': np.median(distances),
-                'std': np.std(distances),
-                'max': np.max(distances),
-                'min': np.min(distances)
-            }
-            
-            return error_stats
+            print(f"3D visualizations saved to {self.output_dir}/views/")
             
         except Exception as e:
-            print(f"Error in registration error visualization: {str(e)}")
-            return None
+            print(f"Warning: Visualization failed: {str(e)}")
+            print("Falling back to saving point clouds only.")
     
-    def create_registration_summary(self, source, target, initial_transform, final_transform, error_stats=None):
-        """Create a summary of the registration process"""
-        print("Creating registration summary...")
-        
-        # Extract rotation and translation from initial and final transforms
-        initial_rotation = initial_transform[:3, :3]
-        initial_translation = initial_transform[:3, 3]
-        initial_euler = Rotation.from_matrix(initial_rotation).as_euler('xyz', degrees=True)
-        
-        final_rotation = final_transform[:3, :3]
-        final_translation = final_transform[:3, 3]
-        final_euler = Rotation.from_matrix(final_rotation).as_euler('xyz', degrees=True)
-        
-        # Create summary document
-        with open(f'{self.output_dir}/registration_summary.txt', 'w') as f:
-            f.write("=== Point Cloud Registration Summary ===\n\n")
-            
-            # Point cloud information
-            f.write("Point Cloud Information:\n")
-            f.write(f"Source: {len(source.points)} points\n")
-            f.write(f"Target: {len(target.points)} points\n\n")
-            
-            # Initial alignment (RANSAC)
-            f.write("Initial Alignment (RANSAC):\n")
-            f.write(f"Fitness: {self.fitness_history[0]:.6f}\n")
-            f.write(f"RMSE: {self.rmse_history[0]:.6f}\n")
-            f.write("Translation (X, Y, Z): ")
-            f.write(f"{initial_translation[0]:.6f}, {initial_translation[1]:.6f}, {initial_translation[2]:.6f}\n")
-            f.write("Rotation (Euler angles in degrees, XYZ): ")
-            f.write(f"{initial_euler[0]:.6f}, {initial_euler[1]:.6f}, {initial_euler[2]:.6f}\n\n")
-            
-            # Final alignment (After ICP)
-            f.write("Final Alignment (After ICP):\n")
-            f.write(f"Fitness: {self.fitness_history[-1]:.6f}\n")
-            f.write(f"RMSE: {self.rmse_history[-1]:.6f}\n")
-            f.write("Translation (X, Y, Z): ")
-            f.write(f"{final_translation[0]:.6f}, {final_translation[1]:.6f}, {final_translation[2]:.6f}\n")
-            f.write("Rotation (Euler angles in degrees, XYZ): ")
-            f.write(f"{final_euler[0]:.6f}, {final_euler[1]:.6f}, {final_euler[2]:.6f}\n\n")
-            
-            # Registration improvement
-            f.write("Registration Improvement:\n")
-            f.write(f"Fitness improvement: {(self.fitness_history[-1] - self.fitness_history[0]) / self.fitness_history[0] * 100:.2f}%\n")
-            f.write(f"RMSE improvement: {(self.rmse_history[0] - self.rmse_history[-1]) / self.rmse_history[0] * 100:.2f}%\n\n")
-            
-            # Error statistics if available
-            if error_stats:
-                f.write("Registration Error Statistics:\n")
-                f.write(f"Mean distance: {error_stats['mean']:.6f}\n")
-                f.write(f"Median distance: {error_stats['median']:.6f}\n")
-                f.write(f"Standard deviation: {error_stats['std']:.6f}\n")
-                f.write(f"Minimum distance: {error_stats['min']:.6f}\n")
-                f.write(f"Maximum distance: {error_stats['max']:.6f}\n\n")
-            
-            # Final transformation matrix
-            f.write("Final Transformation Matrix:\n")
-            for i in range(4):
-                f.write(f"{final_transform[i, 0]:.6f} {final_transform[i, 1]:.6f} ")
-                f.write(f"{final_transform[i, 2]:.6f} {final_transform[i, 3]:.6f}\n")
-            
-        print(f"Registration summary saved to {self.output_dir}/registration_summary.txt")
+    # ============ MAIN PROCESSES ============
     
-    def create_composite_visualization(self):
-        """Create a composite visualization of all results"""
-        try:
-            print("Creating composite visualization...")
-            
-            # Define paths to all generated images
-            image_paths = {
-                'metrics': f'{self.output_dir}/registration_metrics.png',
-                'evolution': f'{self.output_dir}/transformation_evolution.png',
-                'projections': f'{self.output_dir}/2d_projections.png',
-                'error_hist': f'{self.output_dir}/error_histogram.png',
-            }
-            
-            # Add 3D views if they exist
-            view_dir = f'{self.output_dir}/3d_views'
-            if os.path.exists(view_dir):
-                for view in ['isometric', 'front', 'top', 'right']:
-                    before_path = f'{view_dir}/before_registration_{view}.png'
-                    after_path = f'{view_dir}/after_registration_{view}.png'
-                    
-                    if os.path.exists(before_path):
-                        image_paths[f'3d_before_{view}'] = before_path
-                    if os.path.exists(after_path):
-                        image_paths[f'3d_after_{view}'] = after_path
-            
-            # Check which images actually exist
-            existing_images = {}
-            for key, path in image_paths.items():
-                if os.path.exists(path):
-                    existing_images[key] = path
-            
-            # If there are no images, return
-            if not existing_images:
-                print("No visualization images found to create composite.")
-                return
-            
-            # Create an HTML report
-            with open(f'{self.output_dir}/registration_report.html', 'w') as f:
-                f.write('<!DOCTYPE html>\n')
-                f.write('<html lang="en">\n')
-                f.write('<head>\n')
-                f.write('    <meta charset="UTF-8">\n')
-                f.write('    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n')
-                f.write('    <title>Point Cloud Registration Report</title>\n')
-                f.write('    <style>\n')
-                f.write('        body { font-family: Arial, sans-serif; margin: 20px; }\n')
-                f.write('        h1, h2 { color: #333; }\n')
-                f.write('        .section { margin-bottom: 30px; }\n')
-                f.write('        .image-container { text-align: center; margin: 20px 0; }\n')
-                f.write('        img { max-width: 100%; border: 1px solid #ddd; }\n')
-                f.write('        .flex-container { display: flex; flex-wrap: wrap; justify-content: center; }\n')
-                f.write('        .flex-item { margin: 10px; max-width: 45%; }\n')
-                f.write('        .caption { font-style: italic; margin-top: 5px; }\n')
-                f.write('        pre { background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; }\n')
-                f.write('    </style>\n')
-                f.write('</head>\n')
-                f.write('<body>\n')
-                f.write('    <h1>Point Cloud Registration Report</h1>\n')
-                
-                # Add registration summary
-                f.write('    <div class="section">\n')
-                f.write('        <h2>Registration Summary</h2>\n')
-                if os.path.exists(f'{self.output_dir}/registration_summary.txt'):
-                    with open(f'{self.output_dir}/registration_summary.txt', 'r') as summary_file:
-                        f.write('        <pre>\n')
-                        f.write(summary_file.read())
-                        f.write('        </pre>\n')
-                else:
-                    f.write('        <p>Registration summary not available.</p>\n')
-                f.write('    </div>\n')
-                
-                # Add 3D Visualization section
-                if any(key.startswith('3d_') for key in existing_images.keys()):
-                    f.write('    <div class="section">\n')
-                    f.write('        <h2>3D Visualization</h2>\n')
-                    
-                    # Before registration views
-                    f.write('        <h3>Before Registration</h3>\n')
-                    f.write('        <div class="flex-container">\n')
-                    for view in ['isometric', 'front', 'top', 'right']:
-                        key = f'3d_before_{view}'
-                        if key in existing_images:
-                            f.write(f'            <div class="flex-item">\n')
-                            f.write(f'                <img src="{existing_images[key]}" alt="Before Registration - {view} view">\n')
-                            f.write(f'                <div class="caption">{view.capitalize()} View</div>\n')
-                            f.write(f'            </div>\n')
-                    f.write('        </div>\n')
-                    
-                    # After registration views
-                    f.write('        <h3>After Registration</h3>\n')
-                    f.write('        <div class="flex-container">\n')
-                    for view in ['isometric', 'front', 'top', 'right']:
-                        key = f'3d_after_{view}'
-                        if key in existing_images:
-                            f.write(f'            <div class="flex-item">\n')
-                            f.write(f'                <img src="{existing_images[key]}" alt="After Registration - {view} view">\n')
-                            f.write(f'                <div class="caption">{view.capitalize()} View</div>\n')
-                            f.write(f'            </div>\n')
-                    f.write('        </div>\n')
-                    f.write('    </div>\n')
-                
-                # Add 2D Projections
-                if 'projections' in existing_images:
-                    f.write('    <div class="section">\n')
-                    f.write('        <h2>2D Projections</h2>\n')
-                    f.write('        <div class="image-container">\n')
-                    f.write(f'            <img src="{existing_images["projections"]}" alt="2D Projections">\n')
-                    f.write('        </div>\n')
-                    f.write('    </div>\n')
-                
-                # Add Registration Metrics
-                if 'metrics' in existing_images or 'evolution' in existing_images:
-                    f.write('    <div class="section">\n')
-                    f.write('        <h2>Registration Metrics</h2>\n')
-                    f.write('        <div class="flex-container">\n')
-                    if 'metrics' in existing_images:
-                        f.write('            <div class="flex-item">\n')
-                        f.write(f'                <img src="{existing_images["metrics"]}" alt="Registration Metrics">\n')
-                        f.write('                <div class="caption">Registration Fitness and RMSE</div>\n')
-                        f.write('            </div>\n')
-                    if 'evolution' in existing_images:
-                        f.write('            <div class="flex-item">\n')
-                        f.write(f'                <img src="{existing_images["evolution"]}" alt="Transformation Evolution">\n')
-                        f.write('                <div class="caption">Transformation Evolution</div>\n')
-                        f.write('            </div>\n')
-                    f.write('        </div>\n')
-                    f.write('    </div>\n')
-                
-                # Add Error Analysis
-                if 'error_hist' in existing_images:
-                    f.write('    <div class="section">\n')
-                    f.write('        <h2>Error Analysis</h2>\n')
-                    f.write('        <div class="image-container">\n')
-                    f.write(f'            <img src="{existing_images["error_hist"]}" alt="Error Histogram">\n')
-                    f.write('            <div class="caption">Distribution of Registration Errors</div>\n')
-                    f.write('        </div>\n')
-                    f.write('    </div>\n')
-                
-                f.write('</body>\n')
-                f.write('</html>\n')
-            
-            print(f"Composite visualization saved to {self.output_dir}/registration_report.html")
-            
-        except Exception as e:
-            print(f"Error creating composite visualization: {str(e)}")
-    
-    def run_registration(self, source_file, target_file):
-        """Run the complete registration pipeline"""
+    def run_registration(self, source_file, reference_file):
+        """Run the registration pipeline"""
+        print("Starting registration process...")
+        
         # Load point clouds
-        source, target = self.load_point_clouds(source_file, target_file)
-        original_source = copy.deepcopy(source)
-        original_target = copy.deepcopy(target)
+        source, reference, _ = self.load_point_clouds(source_file, reference_file)
         
         # Preprocess point clouds
-        source_processed, source_feat, source_scale = self.preprocess_point_cloud(source, "source")
-        target_processed, target_feat, target_scale = self.preprocess_point_cloud(target, "target")
+        source_processed, source_feat, source_scale, source_center = self.preprocess_point_cloud(source, "source")
+        reference_processed, reference_feat, reference_scale, reference_center = self.preprocess_point_cloud(reference, "reference")
         
         # Global registration (RANSAC)
         initial_transform = self.execute_global_registration(
-            source_processed, target_processed, source_feat, target_feat)
-        
-        # Apply initial transformation to source for visualization
-        source_initial = copy.deepcopy(original_source)
-        source_initial.transform(initial_transform)
+            source_processed, reference_processed, source_feat, reference_feat)
         
         # Refine with ICP
         final_transform_processed = self.refine_registration(
-            source_processed, target_processed, initial_transform)
+            source_processed, reference_processed, initial_transform)
         
         # Scale back the transformation
         scale_matrix = np.eye(4)
-        scale_matrix[0, 0] = scale_matrix[1, 1] = scale_matrix[2, 2] = source_scale / target_scale
+        scale_matrix[0, 0] = scale_matrix[1, 1] = scale_matrix[2, 2] = source_scale / reference_scale
         final_transform = np.matmul(final_transform_processed, scale_matrix)
         
-        # Apply final transformation to original source
-        source_final = copy.deepcopy(original_source)
-        source_final.transform(final_transform)
+        # Save the transformation matrix
+        np.savetxt(f'{self.output_dir}/transformation_src_to_ref.txt', final_transform)
         
-        # Create all visualizations
+        # Save centers for later use in placement
+        np.savetxt(f'{self.output_dir}/source_center.txt', source_center)
+        np.savetxt(f'{self.output_dir}/reference_center.txt', reference_center)
+        
+        # Visualize registration progress
         self.plot_registration_metrics()
         self.visualize_transformation_evolution()
-        self.create_2d_projection_visualizations(original_source, original_target, source_final)
-        self.save_3d_visualizations(original_source, original_target, source_final)
-        error_stats = self.create_registration_error_visualization(source_final, original_target)
-        self.create_registration_summary(original_source, original_target, initial_transform, final_transform, error_stats)
-        self.create_composite_visualization()
         
         # Print final transformation matrix
         print("\nFinal Transformation Matrix:")
@@ -772,36 +494,114 @@ class PointCloudRegistration:
         print(f"Translation (x, y, z): {translation[0]:.4f}, {translation[1]:.4f}, {translation[2]:.4f}")
         print(f"Rotation (Euler angles in degrees, xyz): {euler_angles[0]:.4f}, {euler_angles[1]:.4f}, {euler_angles[2]:.4f}")
         
-        print(f"\nAll results and visualizations saved to {self.output_dir}/")
-        print(f"Open {self.output_dir}/registration_report.html in a web browser to view all visualizations.")
+        return final_transform, source_center, reference_center
+    
+    def run_model_placement(self, source_file, reference_file, scene_file, transform_file=None):
+        """Run the model placement pipeline"""
+        print("Starting model placement process...")
         
-        return final_transform
+        # Load source centers and transformation matrix
+        if transform_file and os.path.exists(transform_file):
+            print(f"Loading transformation from file: {transform_file}")
+            transformation_src_to_ref = np.loadtxt(transform_file)
+            
+            # Try to load centers if they exist
+            source_center_file = os.path.join(os.path.dirname(transform_file), 'source_center.txt')
+            reference_center_file = os.path.join(os.path.dirname(transform_file), 'reference_center.txt')
+            
+            if os.path.exists(source_center_file) and os.path.exists(reference_center_file):
+                source_center = np.loadtxt(source_center_file)
+                reference_center = np.loadtxt(reference_center_file)
+                print("Loaded source and reference centers from files")
+            else:
+                # If centers don't exist, load the clouds and compute centers
+                source_temp, reference_temp, _ = self.load_point_clouds(source_file, reference_file)
+                source_center = np.mean(np.asarray(source_temp.points), axis=0)
+                reference_center = np.mean(np.asarray(reference_temp.points), axis=0)
+                print("Computed centers from point clouds")
+        else:
+            # Perform registration
+            transformation_src_to_ref, source_center, reference_center = self.run_registration(source_file, reference_file)
+        
+        # Load point clouds
+        _, reference, scene = self.load_point_clouds(source_file, reference_file, scene_file)
+        
+        # Downsample scene to max points
+        scene_downsampled = self.adaptive_downsample_point_cloud(scene, self.max_scene_points, "scene")
+        
+        # Place reference in scene
+        reference_in_scene, combined, adjusted_transform = self.place_reference_in_scene(
+            reference, scene_downsampled, transformation_src_to_ref, source_center, reference_center)
+        
+        # Save results
+        self.save_results(reference_in_scene, scene_downsampled, combined)
+        
+        # Create visualizations
+        self.create_visualizations(reference_in_scene, scene_downsampled)
+        
+        # Save the adjusted transformation
+        np.savetxt(f'{self.output_dir}/adjusted_transform.txt', adjusted_transform)
+        
+        print("\nModel placement completed successfully!")
+        print(f"Results saved to {self.output_dir}/")
+        print("\nOutput files:")
+        print(f"- Reference in scene: {self.output_dir}/reference_in_scene.pcd")
+        print(f"- Scene: {self.output_dir}/scene.pcd")
+        print(f"- Combined result: {self.output_dir}/combined_result.pcd")
+        print(f"- Transformation matrices: {self.output_dir}/transformation_src_to_ref.txt")
+        print(f"- Adjusted transformation: {self.output_dir}/adjusted_transform.txt")
+        
+        if os.path.exists(f'{self.output_dir}/views'):
+            print(f"- Visualizations: {self.output_dir}/views/*.png")
+        
+        return adjusted_transform
+    
+    def run_full_pipeline(self, source_file, reference_file, scene_file=None):
+        """Run the full pipeline: registration and placement if scene is provided"""
+        # Create output directory
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # Run registration
+        transformation, source_center, reference_center = self.run_registration(source_file, reference_file)
+        
+        # If scene file is provided, also run model placement
+        if scene_file:
+            print("\n" + "="*50)
+            print("Registration complete. Proceeding with model placement...")
+            print("="*50 + "\n")
+            adjusted_transform = self.run_model_placement(source_file, reference_file, scene_file)
+            return adjusted_transform
+        
+        return transformation
 
 def main():
-    parser = argparse.ArgumentParser(description='Robust Point Cloud Registration')
+    parser = argparse.ArgumentParser(description='Point Cloud Registration and Placement')
     parser.add_argument('--source', type=str, required=True, help='Path to source PCD file')
-    parser.add_argument('--target', type=str, required=True, help='Path to target PLY file')
-    parser.add_argument('--vis', action='store_true', help='Enable Open3D visualization if possible')
-    parser.add_argument('--voxel_size', type=float, default=0.01, help='Voxel size for downsampling')
-    parser.add_argument('--ransac_iter', type=int, default=100000, help='RANSAC iterations')
-    parser.add_argument('--icp_iter', type=int, default=100, help='Maximum ICP iterations')
-    parser.add_argument('--output_dir', type=str, default='registration_results', help='Output directory')
+    parser.add_argument('--reference', type=str, required=True, help='Path to reference PLY file')
+    parser.add_argument('--scene', type=str, help='Path to scene PCD file (optional)')
+    parser.add_argument('--transform', type=str, help='Path to transformation matrix file (optional)')
+    parser.add_argument('--output_dir', type=str, default='processing_results', help='Output directory')
+    parser.add_argument('--max_scene_points', type=int, default=75000, help='Maximum number of points in downsampled scene')
     
     args = parser.parse_args()
     
-    # Create registration object
-    registration = PointCloudRegistration(use_visualization=args.vis)
-    registration.voxel_size = args.voxel_size
-    registration.ransac_iter = args.ransac_iter
-    registration.icp_max_iter = args.icp_iter
-    registration.output_dir = args.output_dir
-    os.makedirs(registration.output_dir, exist_ok=True)
+    # Create processing object
+    processor = PointCloudProcessing()
+    processor.output_dir = args.output_dir
+    processor.max_scene_points = args.max_scene_points
     
     try:
-        transform = registration.run_registration(args.source, args.target)
-        print("\nRegistration completed successfully!")
+        if args.transform and args.scene:
+            # Run placement with provided transformation
+            processor.run_model_placement(args.source, args.reference, args.scene, args.transform)
+        elif args.scene:
+            # Run full pipeline
+            processor.run_full_pipeline(args.source, args.reference, args.scene)
+        else:
+            # Run registration only
+            processor.run_registration(args.source, args.reference)
     except Exception as e:
-        print(f"\nError during registration: {str(e)}")
+        print(f"\nError during processing: {str(e)}")
         import traceback
         traceback.print_exc()
 
