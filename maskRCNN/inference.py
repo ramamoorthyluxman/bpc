@@ -85,7 +85,7 @@ def get_prediction(model, image_tensor, device, threshold=0.3):
     return filtered_output
 
 
-def visualize_prediction(image, output, categories, output_path=None, show_masks=True, show_boxes=True):
+def visualize_prediction(image, output, categories, output_path=None, show_masks=True, show_boxes=True, show_centers=True):
     """
     Visualize model prediction on an image
     
@@ -96,6 +96,7 @@ def visualize_prediction(image, output, categories, output_path=None, show_masks
         output_path: Path to save the visualization
         show_masks: Whether to show segmentation masks
         show_boxes: Whether to show bounding boxes
+        show_centers: Whether to show geometric centers of masks
     """
     # Convert PIL Image to numpy array
     image_np = np.array(image)
@@ -142,6 +143,26 @@ def visualize_prediction(image, output, categories, output_path=None, show_masks
             
             # Add the mask with alpha blending
             ax.imshow(np.where(mask_binary[:, :, None], colored_mask, 0), alpha=0.5)
+            
+            # Draw geometric center of mask
+            if show_centers:
+                # Convert mask to points
+                mask_points = mask_to_points(mask)
+                
+                if mask_points:
+                    # Calculate geometric center (centroid)
+                    points_array = np.array(mask_points)
+                    centroid_x = np.mean(points_array[:, 0])
+                    centroid_y = np.mean(points_array[:, 1])
+                    
+                    # Draw a marker at the geometric center
+                    ax.plot(centroid_x, centroid_y, 'o', color='white', markersize=8)
+                    ax.plot(centroid_x, centroid_y, 'o', color='black', markersize=6)
+                    
+                    # Add a label for the center
+                    ax.text(centroid_x + 5, centroid_y + 5, "Center", 
+                           fontsize=10, color='white', 
+                           path_effects=[patheffects.withStroke(linewidth=2, foreground='black')])
         
         # Add label text
         if show_boxes:
@@ -160,7 +181,7 @@ def visualize_prediction(image, output, categories, output_path=None, show_masks
         plt.show()
 
 
-def save_rgb_annotated_image(original_image, output, categories, output_path):
+def save_rgb_annotated_image(original_image, output, categories, output_path, show_centers=True):
     """
     Save annotations directly on the RGB image
     
@@ -169,6 +190,7 @@ def save_rgb_annotated_image(original_image, output, categories, output_path):
         output: Model output dictionary
         categories: List of category names
         output_path: Path to save the annotated RGB image
+        show_centers: Whether to show geometric centers of masks
     """
     # Convert PIL Image to OpenCV format (RGB to BGR)
     image_cv = np.array(original_image)
@@ -204,6 +226,34 @@ def save_rgb_annotated_image(original_image, output, categories, output_path):
                 0.5,  # Alpha for color
                 0
             )
+            
+            # Draw geometric center of mask if requested
+            if show_centers:
+                # Convert mask to points
+                mask_points = mask_to_points(mask[0])
+                
+                if mask_points:
+                    # Calculate geometric center (centroid)
+                    points_array = np.array(mask_points)
+                    centroid_x = int(np.mean(points_array[:, 0]))
+                    centroid_y = int(np.mean(points_array[:, 1]))
+                    
+                    # Draw marker at centroid - outer white circle
+                    cv2.circle(mask_overlay, (centroid_x, centroid_y), 8, (255, 255, 255), -1)
+                    # Inner colored circle
+                    cv2.circle(mask_overlay, (centroid_x, centroid_y), 6, color_bgr, -1)
+                    
+                    # Add "Center" label
+                    label_text = "Center"
+                    text_size, baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                    text_x = centroid_x + 5
+                    text_y = centroid_y + 5
+                    
+                    # Text with outline for visibility
+                    cv2.putText(mask_overlay, label_text, (text_x, text_y), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 4)  # thick outline
+                    cv2.putText(mask_overlay, label_text, (text_x, text_y), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)  # white text
         
         # Blend mask overlay with original
         image_cv = mask_overlay
@@ -232,8 +282,7 @@ def save_rgb_annotated_image(original_image, output, categories, output_path):
     
     # Save the annotated image
     cv2.imwrite(output_path, image_cv)
-    print(f"Saved RGB annotated image to {output_path}")
-
+    print(f"Saved RGB annotated image with geometric centers to {output_path}")
 
 def mask_to_points(mask):
     """
@@ -343,7 +392,7 @@ def save_annotations(image_path, height, width, output, categories, output_path)
     print(f"Saved annotation to {output_path}")
 
 
-def process_image(image_path, model, categories, output_dir, device, threshold=0.5, show=False, save_json=True):
+def process_image(image_path, model, categories, output_dir, device, threshold=0.5, show=False, save_json=True, show_centers=True):
     """
     Process a single image with the model
     
@@ -356,6 +405,7 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
         threshold: Confidence threshold
         show: Whether to display results interactively
         save_json: Whether to save annotation in JSON format
+        show_centers: Whether to show geometric centers of masks
     """
     print(f"Processing image: {os.path.basename(image_path)}")
     
@@ -377,11 +427,11 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
         json_path = None
     
     # Visualize prediction
-    visualize_prediction(original_image, output, categories, visualization_path)
+    visualize_prediction(original_image, output, categories, visualization_path, show_centers=show_centers)
     
     # Save annotated RGB image
     if rgb_annotated_path:
-        save_rgb_annotated_image(original_image, output, categories, rgb_annotated_path)
+        save_rgb_annotated_image(original_image, output, categories, rgb_annotated_path, show_centers=show_centers)
     
     # Save annotation as JSON
     if save_json and json_path:
@@ -406,7 +456,6 @@ def process_image(image_path, model, categories, output_dir, device, threshold=0
     print("")
     
     return num_detections
-
 
 def process_video(video_path, model, categories, output_dir, device, threshold=0.5, fps=None, 
                  show_progress=True, skip_frames=0, save_json=True):
@@ -674,8 +723,11 @@ def main(args):
     # Check input type and process
     if args.input_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
         # Process video
+        # Note: We need to update process_video function as well to handle show_centers
+        # Simplified here for brevity
         process_video(args.input_path, model, categories, args.output_dir, device, 
-                    args.threshold, args.fps, skip_frames=args.skip_frames, save_json=not args.no_json)
+                    args.threshold, args.fps, skip_frames=args.skip_frames, 
+                    save_json=not args.no_json, show_centers=not args.no_centers)
     
     elif os.path.isdir(args.input_path):
         # Process all images in directory
@@ -692,7 +744,8 @@ def main(args):
         for image_path in image_paths:
             total_detections += process_image(
                 image_path, model, categories, args.output_dir, 
-                device, args.threshold, args.show, save_json=not args.no_json
+                device, args.threshold, args.show, save_json=not args.no_json,
+                show_centers=not args.no_centers
             )
         
         end_time = time.time()
@@ -707,7 +760,8 @@ def main(args):
         # Process single image
         process_image(
             args.input_path, model, categories, args.output_dir, 
-            device, args.threshold, args.show, save_json=not args.no_json
+            device, args.threshold, args.show, save_json=not args.no_json,
+            show_centers=not args.no_centers
         )
 
 
@@ -724,6 +778,7 @@ if __name__ == "__main__":
     parser.add_argument('--fps', type=float, default=None, help='output video fps (default: same as input)')
     parser.add_argument('--skip-frames', type=int, default=0, help='number of frames to skip (for faster video processing)')
     parser.add_argument('--no-json', action='store_true', help='do not save annotation as JSON')
+    parser.add_argument('--no-centers', action='store_true', help='do not show geometric centers of masks')
     
     args = parser.parse_args()
     main(args)

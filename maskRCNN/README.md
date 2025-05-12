@@ -95,6 +95,8 @@ python evaluation.py --data-path /path/to/your/dataset --model-path ./output/mod
 
 ```bash
 python inference.py /path/to/image.jpg --model-path ./output/model_final.pth --categories-file categories.txt
+e.g
+python3 inference.py /home/rama/bpc_ws/bpc/datasets/ipd_val/000000/images/000000_cam1.jpg --model-path /home/rama/bpc_ws/bpc/maskRCNN/output/ipd_val/model_epoch_235.pth --categories-file categories.txt --output-dir /home/rama/bpc_ws/bpc/maskRCNN/results
 ```
 
 For batch processing:

@@ -83,10 +83,10 @@ To predict the pose for test images:
 
 ```bash
 # Basic usage
-python 02_predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image.png
+python predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image.png
 
 # With visualization and saving results
-python 02_predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image1.png /path/to/test_image2.png --display --save_visualization --save_results
+python predict_pose.py --model_path /path/to/models/000000_best_model.pth --test_images /path/to/test_image1.png /path/to/test_image2.png --display --save_visualization --save_results
 ```
 
 Parameters:
