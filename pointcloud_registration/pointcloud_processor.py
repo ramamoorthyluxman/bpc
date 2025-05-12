@@ -15,10 +15,10 @@ class PointCloudProcessor:
         self.voxel_size = 0.01  # Downsampling voxel size for registration
         self.nb_neighbors = 20  # Neighbors for normal estimation
         self.std_ratio = 2.0    # Standard deviation ratio for outlier removal
-        self.distance_threshold = 0.05  # For RANSAC
+        self.distance_threshold = 0.1  # For RANSAC
         self.ransac_n = 3       # Minimum points for RANSAC
         self.ransac_iter = 100000  # RANSAC iterations
-        self.icp_threshold = 0.005  # ICP convergence threshold
+        self.icp_threshold = 0.1  # ICP convergence threshold
         self.icp_max_iter = 100    # Maximum ICP iterations
         
         # Size reduction parameters
@@ -328,7 +328,7 @@ class PointCloudProcessor:
                 transform_names.append(f"After ICP iteration {i+1}")
             
             # Check for convergence
-            if i > 0 and abs(self.fitness_history[-1] - self.fitness_history[-2]) < 1e-6:
+            if i > 0 and abs(self.fitness_history[-1] - self.fitness_history[-2]) < 1e-10:
                 if i not in [0, 4, 9, 19]:
                     transforms.append(current_transform)
                     transform_names.append(f"Final (ICP iteration {i+1})")
