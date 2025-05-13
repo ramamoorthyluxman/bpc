@@ -764,6 +764,50 @@ def main(args):
             show_centers=not args.no_centers
         )
 
+def infer(
+    image_path,
+    model_path,
+    output_path,
+    category_txt_path,
+    confidence_threshold=0.8
+    
+):
+    # Set device
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    print(f"Using device: {device}")
+    
+    # Load categories
+    categories = ['background']
+    try:
+        with open(category_txt_path, 'r') as f:
+            categories = ['background'] + [line.strip() for line in f if line.strip()]
+        print(f"Loaded {len(categories)-1} categories from {category_txt_path}")
+    except Exception as e:
+        print(f"Error loading categories: {e}")
+        print("Using default 'background' category only")
+    
+    
+    # Load model
+    num_classes = len(categories)
+    print(f"Loading model from {model_path} with {num_classes} classes")
+
+    try:
+        model = load_model(model_path, num_classes)
+        model.to(device)
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return
+    
+    # Create output directory
+    os.makedirs(output_path, exist_ok=True)
+    
+    process_image(
+            image_path, model, categories, output_path, 
+            device, confidence_threshold, show=False, save_json=True,
+            show_centers=True
+    )
+    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run inference with Mask R-CNN on images or video")

@@ -71,6 +71,66 @@ def create_organized_point_cloud(rgb_path, depth_path, camera_params):
     
     return pcd, metadata, width, height
 
+def build_pcl(rgb, depth, camera, output):
+    # Load camera parameters
+    camera_params = load_camera_params(camera)
+    
+    # Create point cloud
+    print("Creating organized point cloud...")
+    pcd, metadata, width, height = create_organized_point_cloud(rgb, depth, camera_params)
+    
+    # Save point cloud as PCD (always)
+    output_path = output
+    if not output_path.endswith('.pcd'):
+        # Ensure the output is in PCD format
+        output_path = str(Path(output_path).with_suffix('.pcd'))
+    
+    print(f"Saving organized point cloud to {output_path}...")
+    
+    # Set organized=True when writing to PCD
+    # This ensures the width and height are stored in the PCD file
+    o3d.io.write_point_cloud(output_path, pcd, write_ascii=False, 
+                             compressed=True, print_progress=True)
+    
+    # Manually write width and height to the PCD file
+    # Note: Open3D doesn't directly support writing organized PCD files
+    # so we need to modify the file after writing
+    with open(output_path, 'rb') as f:
+        pcd_content = f.read()
+    
+    # Use the PCD format to properly encode width and height
+    # First, check if we need to modify an existing file
+    if b'WIDTH' in pcd_content:
+        # The file already has WIDTH field, we need to modify it
+        modified_content = pcd_content.replace(
+            b'WIDTH', f'WIDTH {width}\nHEIGHT {height}\n# '.encode())
+    else:
+        # Extract header and binary data
+        header_end = pcd_content.find(b'DATA binary_compressed')
+        if header_end != -1:
+            header_end = pcd_content.find(b'\n', header_end) + 1
+            header = pcd_content[:header_end]
+            binary_data = pcd_content[header_end:]
+            
+            # Insert width and height before DATA line
+            width_height = f'WIDTH {width}\nHEIGHT {height}\n'.encode()
+            modified_content = header.replace(b'DATA binary_compressed', 
+                                            width_height + b'DATA binary_compressed')
+            modified_content += binary_data
+        else:
+            # Fallback if we can't find the DATA line
+            print("Warning: Could not modify PCD file to include organized data structure.")
+            modified_content = pcd_content
+    
+    # Write the modified PCD file
+    with open(output_path, 'wb') as f:
+        f.write(modified_content)
+    
+    print(f"Done! Created organized point cloud with {width}x{height} = {width*height} points")
+    print(f"The point cloud was saved as PCD format, preserving the organized structure.")
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate organized point cloud from RGB and depth images")
     parser.add_argument("--rgb", required=True, help="Path to RGB image")

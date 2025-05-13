@@ -28,3 +28,8 @@ pcl_builder/output/*
 roi_extraction/output
 pointcloud_registration/results
 pointcloud_registration/debug
+maskRCNN/results
+pointcloud_registration/registration_results
+initial_pose_estimation/results
+initial_pose_estimation/output
+reproject/output
