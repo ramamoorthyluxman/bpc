@@ -1,0 +1,23 @@
+# MaskRCNN
+maskrcnn_image_path: "/home/rama/bpc_ws/bpc/datasets/ipd_val/000000/images/000000_cam1.jpg"
+maskrcnn_model_path: "/home/rama/bpc_ws/bpc/maskRCNN/output/ipd_val/model_epoch_235.pth"
+maskrcnn_output_path: "/home/rama/bpc_ws/bpc/maskRCNN/results"
+maskrcnn_confidence_threshold: 0.8
+maskrcnn_category_txt_path: "/home/rama/bpc_ws/bpc/maskRCNN/categories.txt"
+
+# Build 3D PCL
+pcl_builder_rgb_image_path: "/home/rama/bpc_ws/bpc/ipd/val/000000/rgb_cam1/000000.png"
+pcl_builder_depth_image_path: "/home/rama/bpc_ws/bpc/ipd/val/000000/depth_cam1/000000.png"
+pcl_builder_camera_parameters_path: "/home/rama/bpc_ws/bpc/ipd/camera_cam1.json"
+pcl_builder_output_file_path: "/home/rama/bpc_ws/bpc/pcl_builder/output/val_cam1_000000.pcd"
+
+# ROI Extraction
+roi_extraction_annotation_json_path: "/home/rama/bpc_ws/bpc/maskRCNN/results/000000_cam1_annotation.json"
+roi_extraction_output_path: "/home/rama/bpc_ws/bpc/roi_extraction/output"
+
+## Register
+
+register_test_roi_path: "/home/rama/bpc_ws/bpc/roi_extraction/output/obj_000018/obj_000018_roi_0.pcd"
+register_reference_model_path: "/home/rama/bpc_ws/bpc/ipd/models/obj_000018.ply"
+register_output_path: "/home/rama/bpc_ws/bpc/pointcloud_registration/registration_results"
+
