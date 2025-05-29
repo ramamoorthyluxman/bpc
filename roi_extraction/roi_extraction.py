@@ -1,8 +1,9 @@
 import numpy as np
 import json
 import open3d as o3d
-from shapely.geometry import Point, Polygon
+from matplotlib.path import Path
 import os
+from collections import defaultdict
 
 def load_polygons_from_json(json_file_path):
     """
@@ -39,56 +40,77 @@ def load_polygons_from_json(json_file_path):
     
     return polygons_by_label, width, height
 
-def extract_points_in_polygon(points, width, height, polygon_coords):
+def create_combined_mask(polygons_by_label, width, height):
     """
-    Extract points from a point cloud that correspond to pixels within a polygon.
-    Uses a more efficient approach with rasterization and bounding box optimization.
-    
-    Args:
-        points (numpy.ndarray): Point cloud points as numpy array
-        width (int): Width of the organized point cloud
-        height (int): Height of the organized point cloud
-        polygon_coords (list): List of (x, y) tuples representing the polygon vertices
-        
-    Returns:
-        list: Indices of points that fall within the polygon
+    Create a combined mask for all polygons using vectorized operations.
+    Returns a dictionary mapping (label, mask_index) to pixel indices.
     """
-    # Create a Shapely polygon
-    polygon = Polygon(polygon_coords)
+    # Create coordinate grids
+    x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+    pixel_coords = np.column_stack([x_coords.ravel(), y_coords.ravel()])
     
-    # Get the bounding box of the polygon to limit our search area
-    minx, miny, maxx, maxy = polygon.bounds
-    minx, miny = max(0, int(minx)), max(0, int(miny))
-    maxx, maxy = min(width-1, int(maxx)+1), min(height-1, int(maxy)+1)
+    # Dictionary to store indices for each polygon
+    polygon_indices = {}
     
-    # Initialize an empty list for indices
-    indices_in_polygon = []
+    print(f"Processing {sum(len(polys) for polys in polygons_by_label.values())} polygons...")
     
-    # Only iterate over the bounding box area
-    for y in range(miny, maxy):
-        # Calculate the row offset once per row
-        row_offset = y * width
-        for x in range(minx, maxx):
-            # Use Point.within(polygon) which is faster than polygon.contains(Point)
-            if Point(x, y).within(polygon):
-                # Calculate index directly
-                idx = row_offset + x
-                # Check if the point is valid (not NaN or infinite)
-                if idx < len(points) and not (np.isnan(points[idx]).any() or np.isinf(points[idx]).any()):
-                    indices_in_polygon.append(idx)
+    for label, polygons in polygons_by_label.items():
+        for mask_index, polygon_coords in polygons:
+            if len(polygon_coords) < 3:  # Skip invalid polygons
+                continue
+                
+            # Create matplotlib Path object for vectorized containment check
+            path = Path(polygon_coords)
+            
+            # Get bounding box to limit search area
+            poly_array = np.array(polygon_coords)
+            min_x, min_y = np.floor(poly_array.min(axis=0)).astype(int)
+            max_x, max_y = np.ceil(poly_array.max(axis=0)).astype(int)
+            
+            # Clamp to image bounds
+            min_x = max(0, min_x)
+            min_y = max(0, min_y)
+            max_x = min(width - 1, max_x)
+            max_y = min(height - 1, max_y)
+            
+            # Create subset of coordinates within bounding box
+            bbox_mask = ((pixel_coords[:, 0] >= min_x) & (pixel_coords[:, 0] <= max_x) & 
+                        (pixel_coords[:, 1] >= min_y) & (pixel_coords[:, 1] <= max_y))
+            
+            if not np.any(bbox_mask):
+                continue
+                
+            bbox_coords = pixel_coords[bbox_mask]
+            
+            # Vectorized containment check
+            inside_mask = path.contains_points(bbox_coords)
+            
+            if np.any(inside_mask):
+                # Get the original indices of points inside the polygon
+                bbox_indices = np.where(bbox_mask)[0]
+                inside_indices = bbox_indices[inside_mask]
+                
+                # Convert 2D indices to 1D point cloud indices
+                polygon_indices[(label, mask_index)] = inside_indices
+                
+                print(f"  {label} polygon {mask_index}: {len(inside_indices)} pixels")
     
-    return indices_in_polygon
+    return polygon_indices
+
+def filter_valid_points(points, indices):
+    """
+    Filter out invalid points (NaN or infinite values) from the given indices.
+    """
+    valid_mask = np.logical_not(np.logical_or(
+        np.isnan(points[indices]).any(axis=1),
+        np.isinf(points[indices]).any(axis=1)
+    ))
+    return indices[valid_mask]
 
 def get_pcd_dimensions(pcd_file_path):
     """
     Get the width and height of an organized point cloud from a PCD file.
     Handles both ASCII and binary PCD formats.
-    
-    Args:
-        pcd_file_path (str): Path to the PCD file
-        
-    Returns:
-        tuple: (width, height) dimensions of the organized point cloud
     """
     try:
         # First try to read the file as binary
@@ -168,8 +190,7 @@ def get_pcd_dimensions(pcd_file_path):
 
 def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_dir):
     """
-    Extract point clouds for each labeled object in the JSON and save them separately.
-    Each individual polygon (ROI) is saved as a separate PCD file.
+    Optimized version that extracts point clouds for all labeled objects simultaneously.
     
     Args:
         pcd_file_path (str): Path to the organized PCD file
@@ -212,23 +233,34 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
             print(f"Warning: JSON dimensions ({json_width}x{json_height}) don't match PCD dimensions ({width}x{height})")
             print(f"Using PCD dimensions: {width}x{height}")
     
-    # Process each label and its polygons
-    for label, polygons in polygons_by_label.items():
-        print(f"Processing label: {label} with {len(polygons)} polygons...")
+    # Create combined mask for all polygons (OPTIMIZED PART)
+    print("Creating combined mask for all polygons...")
+    polygon_indices = create_combined_mask(polygons_by_label, width, height)
+    
+    # Group by label for directory creation
+    labels_to_process = defaultdict(list)
+    for (label, mask_index), indices in polygon_indices.items():
+        labels_to_process[label].append((mask_index, indices))
+    
+    # Process and save point clouds
+    print("Extracting and saving point clouds...")
+    for label, polygon_data in labels_to_process.items():
+        print(f"Processing label: {label}...")
         
         # Create a subdirectory for this label
         label_dir = os.path.join(output_dir, label)
         os.makedirs(label_dir, exist_ok=True)
         
         # Process each polygon for this label
-        for mask_index, polygon_coords in polygons:
-            # Extract indices of points within this polygon
-            indices = extract_points_in_polygon(points, width, height, polygon_coords)
-            print(f"  Polygon {mask_index+1}: Found {len(indices)} points")
+        for mask_index, indices in polygon_data:
+            # Filter out invalid points
+            valid_indices = filter_valid_points(points, indices)
             
-            if indices:
+            print(f"  Polygon {mask_index}: Found {len(valid_indices)} valid points (from {len(indices)} total)")
+            
+            if len(valid_indices) > 0:
                 # Extract the subset of points for this specific polygon
-                extracted_points = points[indices]
+                extracted_points = points[valid_indices]
                 
                 # Create a new point cloud with only these points
                 extracted_cloud = o3d.geometry.PointCloud()
@@ -236,12 +268,12 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
                 
                 # Copy colors if available
                 if colors is not None:
-                    extracted_colors = colors[indices]
+                    extracted_colors = colors[valid_indices]
                     extracted_cloud.colors = o3d.utility.Vector3dVector(extracted_colors)
                 
                 # Copy normals if available
                 if normals is not None:
-                    extracted_normals = normals[indices]
+                    extracted_normals = normals[valid_indices]
                     extracted_cloud.normals = o3d.utility.Vector3dVector(extracted_normals)
                 
                 # Save the extracted point cloud with the label and polygon index as filename
@@ -250,9 +282,9 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
                 # Write the point cloud file
                 o3d.io.write_point_cloud(output_file, extracted_cloud)
                 
-                print(f"  Saved polygon {mask_index} with {len(indices)} points to {output_file}")
+                print(f"  Saved polygon {mask_index} with {len(valid_indices)} points to {output_file}")
             else:
-                print(f"  No points found for polygon {mask_index}")
+                print(f"  No valid points found for polygon {mask_index}")
     
     print("Processing complete.")
 
@@ -264,15 +296,14 @@ def main():
     
     # Parse command line arguments if provided
     import argparse
-    parser = argparse.ArgumentParser(description='Extract point clouds for labeled objects from polygons in an image.')
+    parser = argparse.ArgumentParser(description='Extract point clouds for labeled objects from polygons in an image (optimized version).')
     parser.add_argument('--pcd', type=str, default=pcd_file_path, help='Path to the PCD file')
     parser.add_argument('--json', type=str, default=json_file_path, help='Path to the JSON file with polygon coordinates')
     parser.add_argument('--output', type=str, default=output_dir, help='Directory to save the extracted point clouds')
-    parser.add_argument('--no-verify', action='store_true', help='Skip mapping verification')
     args = parser.parse_args()
     
-    # Extract and save point clouds for each labeled object
-    extract_and_save_labeled_point_clouds(args.pcd, args.json, args.output)
+    # Extract and save point clouds for each labeled object (optimized version)
+    extract_and_save_labeled_point_clouds_optimized(args.pcd, args.json, args.output)
 
 if __name__ == "__main__":
     main()
