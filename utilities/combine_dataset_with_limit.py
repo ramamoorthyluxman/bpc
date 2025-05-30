@@ -212,3 +212,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     combine_datasets(args.input_dirs, args.output_dir, args.limit)
+
+    # python3 combine_dataset_with_limit.py --input-dirs /home/rama/bpc_ws/bpc/ipd/bpc_phase2/train_pbr/000000 /home/rama/bpc_ws/bpc/ipd/bpc_phase2/train_pbr/000001 /home/rama/bpc_ws/bpc/ipd/bpc_phase2/train_pbr/000003 /home/rama/bpc_ws/bpc/ipd/bpc_phase2/train_pbr/000004 /home/rama/bpc_ws/bpc/ipd/bpc_phase2/train_pbr/000005 --output-dir /home/rama/bpc_ws/bpc/datasets/phase2_train --limit 10
