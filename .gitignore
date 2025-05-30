@@ -33,3 +33,4 @@ pointcloud_registration/registration_results
 initial_pose_estimation/results
 initial_pose_estimation/output
 reproject/output
+pose_estimation_pipeline/registration_results

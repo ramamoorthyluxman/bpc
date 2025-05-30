@@ -5,23 +5,20 @@ from matplotlib.path import Path
 import os
 from collections import defaultdict
 
-def load_polygons_from_json(json_file_path):
+def load_polygons_from_json_data(json_data):
     """
-    Load all polygon points from a JSON file with the provided structure.
+    Load all polygon points from JSON data (dict) with the provided structure.
     Returns a dictionary where keys are object labels and values are lists of polygons.
     """
-    with open(json_file_path, 'r') as f:
-        data = json.load(f)
-    
     # Dictionary to store all polygons by label
     polygons_by_label = {}
     
     # Extract masks from the JSON
-    masks = data.get('masks', [])
+    masks = json_data.get('masks', [])
     
     # Extract width and height for the image
-    width = data.get('width')
-    height = data.get('height')
+    width = json_data.get('width')
+    height = json_data.get('height')
     
     # Process each mask in the JSON
     for mask_index, mask in enumerate(masks):
@@ -107,106 +104,28 @@ def filter_valid_points(points, indices):
     ))
     return indices[valid_mask]
 
-def get_pcd_dimensions(pcd_file_path):
+def extract_labeled_point_clouds(point_cloud, json_data, output_dir=None, save_rois=True):
     """
-    Get the width and height of an organized point cloud from a PCD file.
-    Handles both ASCII and binary PCD formats.
-    """
-    try:
-        # First try to read the file as binary
-        with open(pcd_file_path, 'rb') as f:
-            header_lines = []
-            line = f.readline().decode('ascii', errors='ignore').strip()
-            
-            # Read the header lines
-            while line and not line.startswith('DATA'):
-                header_lines.append(line)
-                line = f.readline().decode('ascii', errors='ignore').strip()
-            
-            # Extract width and height from the header
-            width, height = None, None
-            for line in header_lines:
-                if line.startswith('WIDTH'):
-                    width = int(line.split()[-1])
-                elif line.startswith('HEIGHT'):
-                    height = int(line.split()[-1])
-                
-                # If both width and height are found, we can stop
-                if width is not None and height is not None:
-                    break
-        
-        # If we couldn't find the dimensions in the header, try alternative method
-        if width is None or height is None:
-            # Use Open3D to load the point cloud and get metadata
-            pcd = o3d.io.read_point_cloud(pcd_file_path)
-            
-            # Try to get dimensions from loaded point cloud
-            try:
-                # Some point cloud libraries store these as attributes
-                width = pcd.width
-                height = pcd.height
-            except:
-                # If not available as attributes, we can use heuristics
-                # For organized point clouds, width * height = number of points
-                total_points = len(np.asarray(pcd.points))
-                
-                # Try to factorize using common image dimensions
-                for w in [640, 1280, 1920, 3840, 512, 800, 1024, 2048]:
-                    if total_points % w == 0:
-                        width = w
-                        height = total_points // w
-                        break
-    except Exception as e:
-        print(f"Error reading PCD file: {e}")
-        # As a fallback, use Open3D to load the point cloud
-        try:
-            pcd = o3d.io.read_point_cloud(pcd_file_path)
-            # Try to infer dimensions from the point count
-            total_points = len(np.asarray(pcd.points))
-            
-            # Try common resolutions
-            for w in [640, 1280, 1920, 3840, 512, 800, 1024, 2048]:
-                if total_points % w == 0:
-                    width = w
-                    height = total_points // w
-                    break
-                    
-            # If still not found, try to find factors close to square root
-            if width is None:
-                sqrt_val = int(np.sqrt(total_points))
-                for w in range(sqrt_val - 20, sqrt_val + 20):
-                    if w > 0 and total_points % w == 0:
-                        width = w
-                        height = total_points // w
-                        break
-        except Exception as inner_e:
-            print(f"Failed to load PCD with Open3D: {inner_e}")
-    
-    # If we couldn't find the dimensions, raise an error
-    if width is None or height is None:
-        raise ValueError("Could not extract width and height from PCD file")
-    
-    return width, height
-
-def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_dir):
-    """
-    Optimized version that extracts point clouds for all labeled objects simultaneously.
+    Extract point clouds for all labeled objects based on polygon coordinates.
     
     Args:
-        pcd_file_path (str): Path to the organized PCD file
-        json_file_path (str): Path to the JSON file with polygon coordinates
-        output_dir (str): Directory to save the extracted point clouds
+        point_cloud (o3d.geometry.PointCloud): The input point cloud object
+        json_data (dict): JSON data containing polygon coordinates and labels
+        output_dir (str): Directory to save the extracted point clouds (optional if save_rois=False)
+        save_rois (bool): Whether to save the ROI point clouds to files (default: True)
+        
+    Returns:
+        list: Always returns list of tuples with extracted point clouds and their object IDs
+              Format: [(point_cloud_object, object_id_dict), ...]
+              where object_id_dict = {'label': str, 'mask_index': int, 'point_count': int}
     """
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    # Validate arguments
+    if save_rois and output_dir is None:
+        raise ValueError("output_dir is required when save_rois=True")
     
-    # Get the width and height directly from the PCD file
-    width, height = get_pcd_dimensions(pcd_file_path)
-    print(f"Retrieved from PCD file - Width: {width}, Height: {height}")
-    
-    # Load the point cloud
-    print(f"Loading point cloud from {pcd_file_path}...")
-    point_cloud = o3d.io.read_point_cloud(pcd_file_path)
+    # Create output directory if saving and it doesn't exist
+    if save_rois:
+        os.makedirs(output_dir, exist_ok=True)
     
     # Get points as numpy array
     points = np.asarray(point_cloud.points)
@@ -222,34 +141,34 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
     if normals is not None:
         print(f"Point cloud has normal vectors.")
     
-    # Load polygons from JSON
-    print(f"Loading polygon data from {json_file_path}...")
-    polygons_by_label, json_width, json_height = load_polygons_from_json(json_file_path)
-    print(f"Found {len(polygons_by_label)} unique labels in the JSON file.")
-    
-    # Check if the JSON width/height match the PCD width/height
-    if json_width is not None and json_height is not None:
-        if json_width != width or json_height != height:
-            print(f"Warning: JSON dimensions ({json_width}x{json_height}) don't match PCD dimensions ({width}x{height})")
-            print(f"Using PCD dimensions: {width}x{height}")
+    # Load polygons from JSON data
+    print(f"Loading polygon data from JSON...")
+    polygons_by_label, width, height = load_polygons_from_json_data(json_data)
+    print(f"Found {len(polygons_by_label)} unique labels in the JSON data.")
+    print(f"Using JSON dimensions: {width}x{height}")
     
     # Create combined mask for all polygons (OPTIMIZED PART)
     print("Creating combined mask for all polygons...")
     polygon_indices = create_combined_mask(polygons_by_label, width, height)
     
-    # Group by label for directory creation
+    # Group by label for processing
     labels_to_process = defaultdict(list)
     for (label, mask_index), indices in polygon_indices.items():
         labels_to_process[label].append((mask_index, indices))
     
-    # Process and save point clouds
-    print("Extracting and saving point clouds...")
+    # List to store extracted point clouds with their IDs (ALWAYS created now)
+    extracted_clouds_list = []
+
+    
+    # Process and save/return point clouds
+    print("Extracting point clouds...")
     for label, polygon_data in labels_to_process.items():
         print(f"Processing label: {label}...")
         
-        # Create a subdirectory for this label
-        label_dir = os.path.join(output_dir, label)
-        os.makedirs(label_dir, exist_ok=True)
+        # Create a subdirectory for this label if saving
+        if save_rois:
+            label_dir = os.path.join(output_dir, label)
+            os.makedirs(label_dir, exist_ok=True)
         
         # Process each polygon for this label
         for mask_index, indices in polygon_data:
@@ -276,17 +195,30 @@ def extract_and_save_labeled_point_clouds(pcd_file_path, json_file_path, output_
                     extracted_normals = normals[valid_indices]
                     extracted_cloud.normals = o3d.utility.Vector3dVector(extracted_normals)
                 
-                # Save the extracted point cloud with the label and polygon index as filename
-                output_file = os.path.join(label_dir, f"{label}_roi_{mask_index}.pcd")
+                # ALWAYS store the extracted point cloud with its object ID in memory
+                object_id = {
+                    'label': label,
+                    'mask_index': mask_index,
+                    'point_count': len(valid_indices)
+                }
+                extracted_clouds_list.append((extracted_cloud, object_id))
                 
-                # Write the point cloud file
-                o3d.io.write_point_cloud(output_file, extracted_cloud)
-                
-                print(f"  Saved polygon {mask_index} with {len(valid_indices)} points to {output_file}")
+                if save_rois:
+                    # Save the extracted point cloud with the label and polygon index as filename
+                    output_file = os.path.join(label_dir, f"{label}_roi_{mask_index}.pcd")
+                    
+                    # Write the point cloud file
+                    o3d.io.write_point_cloud(output_file, extracted_cloud)
+                    
+                    print(f"  Saved polygon {mask_index} with {len(valid_indices)} points to {output_file}")
+                else:
+                    print(f"  Extracted polygon {mask_index} with {len(valid_indices)} points")
             else:
                 print(f"  No valid points found for polygon {mask_index}")
     
-    print("Processing complete.")
+    # ALWAYS return the extracted clouds list
+    print(f"Processing complete. Returning {len(extracted_clouds_list)} extracted point clouds.")
+    return extracted_clouds_list
 
 def main():
     # File paths - you should update these to match your file paths
@@ -296,14 +228,38 @@ def main():
     
     # Parse command line arguments if provided
     import argparse
-    parser = argparse.ArgumentParser(description='Extract point clouds for labeled objects from polygons in an image (optimized version).')
+    parser = argparse.ArgumentParser(description='Extract point clouds for labeled objects from polygons in an image.')
     parser.add_argument('--pcd', type=str, default=pcd_file_path, help='Path to the PCD file')
     parser.add_argument('--json', type=str, default=json_file_path, help='Path to the JSON file with polygon coordinates')
     parser.add_argument('--output', type=str, default=output_dir, help='Directory to save the extracted point clouds')
+    parser.add_argument('--no-save', action='store_true', help='Don\'t save ROI point clouds, just return data')
     args = parser.parse_args()
     
-    # Extract and save point clouds for each labeled object (optimized version)
-    extract_and_save_labeled_point_clouds_optimized(args.pcd, args.json, args.output)
+    # Load data from files for command line usage
+    point_cloud = o3d.io.read_point_cloud(args.pcd)
+    print(f"Loaded point cloud from {args.pcd}")
+    
+    with open(args.json, 'r') as f:
+        json_data = json.load(f)
+    print(f"Loaded JSON data from {args.json}")
+    
+    save_rois = not args.no_save
+    
+    # Extract point clouds using the function
+    result = extract_labeled_point_clouds(
+        point_cloud=point_cloud,
+        json_data=json_data,
+        output_dir=args.output if save_rois else None,
+        save_rois=save_rois
+    )
+    
+    # Result is ALWAYS a list now
+    print(f"\nExtracted {len(result)} point cloud ROIs:")
+    for i, (point_cloud_obj, object_id) in enumerate(result):
+        label = object_id['label']
+        mask_index = object_id['mask_index']
+        point_count = object_id['point_count']
+        print(f"  ROI {i+1}: {label} (mask {mask_index}) - {point_count} points")
 
 if __name__ == "__main__":
     main()
