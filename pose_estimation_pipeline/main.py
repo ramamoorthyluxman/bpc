@@ -332,7 +332,11 @@ if __name__ == "__main__":
     pipeline = pose_estimation_pipeline("config.yaml")
     
     # Run pipeline with your images
-    rgb_image_path = "/home/rama/bpc_ws/bpc/datasets/ipd_val/000000/images/000000_cam1.jpg"
+    # rgb_image_path = "/home/rama/bpc_ws/bpc/ipd/val/000000/rgb_photoneo/000000.png"
+    # depth_image_path = "/home/rama/bpc_ws/bpc/ipd/val/000000/depth_photoneo/000000.png"
+    # camera_params_path = "/home/rama/bpc_ws/bpc/ipd/camera_photoneo.json"
+
+    rgb_image_path = "/home/rama/bpc_ws/bpc/ipd/val/000000/rgb_cam1/000000.png"
     depth_image_path = "/home/rama/bpc_ws/bpc/ipd/val/000000/depth_cam1/000000.png"
     camera_params_path = "/home/rama/bpc_ws/bpc/ipd/camera_cam1.json"
     
