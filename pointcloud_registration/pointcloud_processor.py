@@ -166,6 +166,10 @@ class PointCloudProcessor:
         print(f"Trying voxel downsampling with size {voxel_size:.6f}...")
         downsampled = pcd.voxel_down_sample(voxel_size)
         current_points = len(downsampled.points)
+
+        if current_points < 10:
+            downsampled = copy.deepcopy(pcd)
+            current_points = len(downsampled.points)
         
         # If we're still over the limit, use random sampling as fallback
         if current_points > target_points:
@@ -861,6 +865,8 @@ class PointCloudProcessor:
         reference_bytes = len(reference_transformed.points) * 24  # RGB points
         scene_bytes = target_bytes - reference_bytes
         scene_points = max(1000, int(scene_bytes / 24))  # At least 1000 points
+
+        print("scene points: ", len(scene.points))
         
         print(f"Target file size: {self.max_file_size_mb} MB")
         print(f"Allocating {len(reference_transformed.points)} points to reference")
@@ -871,6 +877,8 @@ class PointCloudProcessor:
             scene_downsampled = self.downsample_point_cloud(scene, scene_points, "scene")
         else:
             scene_downsampled = copy.deepcopy(scene)
+
+        print("downsampled scene points: ", len(scene_downsampled.points))
         
         # Combine point clouds
         combined = o3d.geometry.PointCloud()
