@@ -193,6 +193,8 @@ class pose_estimation_pipeline:
         
         # Sort results by object index to maintain order
         results.sort(key=lambda x: x['object_index'])
+
+        print("results: ", results)
         
         return results
 

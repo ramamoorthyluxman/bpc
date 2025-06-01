@@ -9,12 +9,11 @@ import os
 import time
 import csv
 
-dataset_path = "/home/rama/bpc_ws/bpc/ipd/test"
 
 # Initialize pipeline
 pipeline = pose_estimation_pipeline("/home/rama/bpc_ws/bpc/pose_estimation_pipeline/config.yaml")
 
-dataset_path = "/home/rama/bpc_ws/bpc/ipd/test"
+dataset_path = "/home/rama/bpc_ws/bpc/datasets/dummy"
 camera_params_path = "/home/rama/bpc_ws/bpc/ipd/camera_photoneo.json"  # Update as needed
 output_csv = "pose_estimation_results.csv"
 
@@ -48,15 +47,16 @@ with open(output_csv, 'w', newline='') as csvfile:
                                 execution_time = time.time() - start_time
                                 
                                 # Parse results and write to CSV
-                                for obj_id, result in enumerate(results):
-                                    # Extract score and transformation
-                                    score = result.get('Score', 0.0)
-                                    transformation = result.get('Transformation', ('', ''))
-                                    
-                                    R = transformation[0]  # Rotation matrix as string
-                                    t = transformation[1]  # Translation vector as string
-                                    
-                                    writer.writerow([scene_folder, image_id, obj_id, score, R, t, execution_time])
+                                for result in results:
+                                    if result.get('success', False):  # Only process successful detections
+                                        obj_id = result['label']
+                                        score = result['confidence_score']
+                                        transformation = result['transformation']
+                                        
+                                        R = transformation[0]  # Rotation matrix as string
+                                        t = transformation[1]  # Translation vector as string
+                                        
+                                        writer.writerow([scene_folder, image_id, obj_id, score, R, t, execution_time])
                             
                             except Exception as e:
                                 print(f"Error processing {scene_folder}/{image_id}: {e}")
