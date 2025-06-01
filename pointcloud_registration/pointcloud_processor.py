@@ -33,7 +33,200 @@ class PointCloudProcessor:
         # Tracking registration progress
         self.fitness_history = []
         self.rmse_history = []
+        self.convergence_iterations = 0
     
+    def compute_registration_confidence(self, source_processed, target_processed, final_transform):
+        """
+        Compute a confidence score for the registration result.
+        
+        Args:
+            source_processed: Processed source point cloud
+            target_processed: Processed target point cloud  
+            final_transform: Final transformation matrix
+            
+        Returns:
+            confidence_score: Float between 0 and 1 (higher is better)
+            confidence_details: Dictionary with detailed confidence metrics
+        """
+        print("Computing registration confidence score...")
+        
+        # Apply final transformation to source
+        source_transformed = copy.deepcopy(source_processed)
+        source_transformed.transform(final_transform)
+        
+        # Compute final alignment metrics
+        final_fitness = self.fitness_history[-1] if self.fitness_history else 0.0
+        final_rmse = self.rmse_history[-1] if self.rmse_history else float('inf')
+        
+        # 1. Fitness score component (0 to 1, higher is better)
+        fitness_score = min(final_fitness, 1.0)
+        
+        # 2. RMSE component (normalize by point cloud scale)
+        source_points = np.asarray(source_processed.points)
+        target_points = np.asarray(target_processed.points)
+        
+        # Estimate point cloud scale for RMSE normalization
+        source_scale = np.std(np.linalg.norm(source_points, axis=1))
+        target_scale = np.std(np.linalg.norm(target_points, axis=1))
+        avg_scale = (source_scale + target_scale) / 2
+        
+        # Normalize RMSE by scale (lower normalized RMSE is better)
+        normalized_rmse = final_rmse / max(avg_scale, 1e-6)
+        rmse_score = max(0.0, 1.0 - min(normalized_rmse, 1.0))
+        
+        # 3. Convergence quality component
+        convergence_score = 0.5  # Default neutral score
+        if len(self.fitness_history) > 1:
+            # Check if fitness improved during ICP
+            fitness_improvement = self.fitness_history[-1] - self.fitness_history[0]
+            convergence_score = min(1.0, max(0.0, 0.5 + fitness_improvement))
+            
+            # Penalize if RMSE got worse during refinement
+            if len(self.rmse_history) > 1:
+                rmse_change = self.rmse_history[0] - self.rmse_history[-1]  # Positive if RMSE improved
+                if rmse_change < 0:  # RMSE got worse
+                    convergence_score *= 0.8
+        
+        # 4. Geometric consistency check
+        geometry_score = 0.5  # Default neutral score
+        try:
+            # Check overlap between transformed source and target
+            source_tree = o3d.geometry.KDTreeFlann(target_processed)
+            source_trans_points = np.asarray(source_transformed.points)
+            
+            overlap_count = 0
+            overlap_threshold = self.voxel_size * 2  # Reasonable overlap threshold
+            
+            for point in source_trans_points:
+                _, indices, distances = source_tree.search_radius_vector_3d(point, overlap_threshold)
+                if len(indices) > 0:
+                    overlap_count += 1
+            
+            overlap_ratio = overlap_count / len(source_trans_points)
+            geometry_score = min(1.0, overlap_ratio)
+            
+        except Exception as e:
+            print(f"Warning: Could not compute geometric consistency: {str(e)}")
+            geometry_score = 0.5
+        
+        # 5. Transformation reasonableness check
+        transform_score = 1.0
+        try:
+            # Check if transformation is reasonable (not too extreme)
+            rotation = final_transform[:3, :3]
+            translation = final_transform[:3, 3]
+            
+            # Check rotation matrix properties
+            det = np.linalg.det(rotation)
+            if abs(det - 1.0) > 0.1:  # Should be close to 1 for proper rotation
+                transform_score *= 0.7
+            
+            # Check orthogonality
+            orthogonality_error = np.linalg.norm(np.dot(rotation, rotation.T) - np.eye(3))
+            if orthogonality_error > 0.1:
+                transform_score *= 0.8
+            
+            # Check if translation is reasonable relative to point cloud scale
+            translation_magnitude = np.linalg.norm(translation)
+            if translation_magnitude > avg_scale * 3:  # Very large translation
+                transform_score *= 0.9
+                
+        except Exception as e:
+            print(f"Warning: Could not validate transformation: {str(e)}")
+            transform_score = 0.8
+        
+        # Combine all components with weights
+        weights = {
+            'fitness': 0.3,
+            'rmse': 0.25,
+            'convergence': 0.2,
+            'geometry': 0.15,
+            'transform': 0.1
+        }
+        
+        confidence_score = (
+            weights['fitness'] * fitness_score +
+            weights['rmse'] * rmse_score +
+            weights['convergence'] * convergence_score +
+            weights['geometry'] * geometry_score +
+            weights['transform'] * transform_score
+        )
+        
+        # Compile detailed metrics
+        confidence_details = {
+            'overall_confidence': confidence_score,
+            'final_fitness': final_fitness,
+            'final_rmse': final_rmse,
+            'normalized_rmse': normalized_rmse,
+            'convergence_iterations': self.convergence_iterations,
+            'overlap_ratio': geometry_score,
+            'component_scores': {
+                'fitness_score': fitness_score,
+                'rmse_score': rmse_score,
+                'convergence_score': convergence_score,
+                'geometry_score': geometry_score,
+                'transform_score': transform_score
+            },
+            'weights': weights
+        }
+        
+        print(f"Registration confidence: {confidence_score:.3f}")
+        print(f"  Fitness component: {fitness_score:.3f}")
+        print(f"  RMSE component: {rmse_score:.3f}")
+        print(f"  Convergence component: {convergence_score:.3f}")
+        print(f"  Geometry component: {geometry_score:.3f}")
+        print(f"  Transform component: {transform_score:.3f}")
+        
+        return confidence_score, confidence_details
+    
+    def save_confidence_report(self, confidence_score, confidence_details):
+        """Save detailed confidence report to file"""
+        confidence_file = os.path.join(self.output_dir, 'confidence_report.txt')
+        
+        with open(confidence_file, 'w') as f:
+            f.write("Registration Confidence Report\n")
+            f.write("=============================\n\n")
+            
+            f.write(f"Overall Confidence Score: {confidence_score:.3f}\n")
+            f.write(f"Confidence Level: ")
+            if confidence_score >= 0.8:
+                f.write("High (Excellent registration)\n")
+            elif confidence_score >= 0.6:
+                f.write("Medium-High (Good registration)\n")
+            elif confidence_score >= 0.4:
+                f.write("Medium (Acceptable registration)\n")
+            elif confidence_score >= 0.2:
+                f.write("Low (Poor registration)\n")
+            else:
+                f.write("Very Low (Failed registration)\n")
+            
+            f.write("\nDetailed Metrics:\n")
+            f.write(f"  Final Fitness: {confidence_details['final_fitness']:.6f}\n")
+            f.write(f"  Final RMSE: {confidence_details['final_rmse']:.6f}\n")
+            f.write(f"  Normalized RMSE: {confidence_details['normalized_rmse']:.6f}\n")
+            f.write(f"  Convergence Iterations: {confidence_details['convergence_iterations']}\n")
+            f.write(f"  Overlap Ratio: {confidence_details['overlap_ratio']:.3f}\n")
+            
+            f.write("\nComponent Scores:\n")
+            for component, score in confidence_details['component_scores'].items():
+                weight = confidence_details['weights'].get(component.replace('_score', ''), 0)
+                f.write(f"  {component}: {score:.3f} (weight: {weight:.2f})\n")
+            
+            f.write("\nRecommendations:\n")
+            if confidence_score < 0.4:
+                f.write("- Registration quality is poor. Consider:\n")
+                f.write("  * Adjusting registration parameters\n")
+                f.write("  * Using better initial alignment\n")
+                f.write("  * Checking point cloud quality and overlap\n")
+            elif confidence_score < 0.6:
+                f.write("- Registration quality is acceptable but could be improved:\n")
+                f.write("  * Fine-tune ICP parameters\n")
+                f.write("  * Consider multi-scale registration\n")
+            else:
+                f.write("- Registration quality is good to excellent\n")
+        
+        print(f"Confidence report saved to {confidence_file}")
+
     def transform_to_rt_format(self, transform):
         """
         Convert 4x4 transformation matrix to R, t format.
@@ -380,6 +573,7 @@ class PointCloudProcessor:
         source_transformed.transform(current_transform)
         
         # Iterative ICP
+        self.convergence_iterations = 0
         for i in range(self.icp_max_iter):
             print(f"ICP iteration {i+1}/{self.icp_max_iter}")
             
@@ -402,6 +596,7 @@ class PointCloudProcessor:
             # Save results for progress tracking
             self.fitness_history.append(result.fitness)
             self.rmse_history.append(result.inlier_rmse)
+            self.convergence_iterations = i + 1
             
             if save_visualizations:
                 # Save major steps in the transform sequence
@@ -424,7 +619,14 @@ class PointCloudProcessor:
         scale_matrix[0, 0] = scale_matrix[1, 1] = scale_matrix[2, 2] = source_scale / target_scale
         final_transform = np.matmul(final_transform_processed, scale_matrix)
         
+        # Compute confidence score
+        confidence_score, confidence_details = self.compute_registration_confidence(
+            source_processed, target_processed, final_transform_processed)
+        
         if save_visualizations:
+            # Save confidence report
+            self.save_confidence_report(confidence_score, confidence_details)
+            
             # Add the final scaled-back transform
             transforms.append(final_transform)
             transform_names.append("Final (after scaling)")
@@ -442,7 +644,7 @@ class PointCloudProcessor:
             # Save visualization after registration
             self.visualize_registration(source, target, final_transform, step="after")
         
-        return final_transform, source_center, target_center
+        return final_transform, source_center, target_center, confidence_score
     
     def visualize_transform_sequence(self, source, target, transforms, names):
         """
@@ -984,6 +1186,7 @@ class PointCloudProcessor:
         Returns:
             R_str, t_str: Transformation in R,t format
             source_center, reference_center: Point cloud centers
+            confidence_score: Registration confidence score (0-1)
         """
         
         # Load or use provided point clouds
@@ -1009,8 +1212,8 @@ class PointCloudProcessor:
             source, reference, reference_for_reg, _, source_center, reference_center = self.load_point_clouds(
                 source_file, reference_file)
         
-        # Register
-        transform, source_center, reference_center = self.register_point_clouds(source, reference_for_reg)
+        # Register (now returns confidence score too)
+        transform, source_center, reference_center, confidence_score = self.register_point_clouds(source, reference_for_reg)
         
         # Save transformation in R,t format
         rt_transform_file = os.path.join(self.output_dir, 'transformation_rt.txt')
@@ -1032,6 +1235,7 @@ class PointCloudProcessor:
         print("\nRegistration completed successfully!")
         print(f"Transformation matrix saved to {transform_file}")
         print(f"Transformation R,t format saved to {rt_transform_file}")
+        print(f"Registration confidence: {confidence_score:.3f}")
         
         # Convert to R,t format for display and return
         R_str, t_str = self.transform_to_rt_format(transform)
@@ -1040,8 +1244,8 @@ class PointCloudProcessor:
         print(f"R: {R_str}")
         print(f"t: {t_str}")
         
-        # Return in R,t format instead of 4x4 matrix
-        return R_str, t_str, source_center, reference_center
+        # Return confidence score as well
+        return R_str, t_str, source_center, reference_center, confidence_score
     
     def run_placement_only(self, source_file, reference_file, scene_file, transform_file, output_file):
         """Run placement using pre-computed transformation"""
@@ -1136,6 +1340,7 @@ class PointCloudProcessor:
             
         Returns:
             R_str, t_str: The computed transformation in R,t format
+            confidence_score: Registration confidence score (0-1)
         """
         
         # Use provided point cloud objects and load reference from file
@@ -1179,8 +1384,8 @@ class PointCloudProcessor:
         print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
         print(f"Scene point cloud has {len(scene.points)} points")
         
-        # Register with conditional visualization
-        transform, source_center, reference_center = self.register_point_clouds(
+        # Register with conditional visualization (now returns confidence score too)
+        transform, source_center, reference_center, confidence_score = self.register_point_clouds(
             source, reference_for_reg, save_visualizations=visualize_and_save_results)
         
         if visualize_and_save_results:
@@ -1202,11 +1407,13 @@ class PointCloudProcessor:
             self.plot_registration_metrics()
             
             print("\nRegistration completed. Proceeding with placement...")
+            print(f"Registration confidence: {confidence_score:.3f}")
             
             # Visualize reference and scene before placement
             self.visualize_scene_placement(reference, scene, step="before")
         else:
             print("\nRegistration completed (visualization skipped). Proceeding with placement...")
+            print(f"Registration confidence: {confidence_score:.3f}")
 
         if visualize_and_save_results:        
             # Place reference in scene
@@ -1236,9 +1443,10 @@ class PointCloudProcessor:
         print(f"\nTransformation in R,t format:")
         print(f"R: {R_str}")
         print(f"t: {t_str}")
+        print(f"Registration confidence: {confidence_score:.3f}")
         
-        # Always return the transformation in R,t format
-        return R_str, t_str
+        # Always return the transformation in R,t format plus confidence score
+        return R_str, t_str, confidence_score
 
 def main():
     parser = argparse.ArgumentParser(description='Point Cloud Registration and Placement with Size Reduction')
@@ -1270,16 +1478,18 @@ def main():
                 args.source, args.reference, args.scene, args.transform, args.output)
         elif args.scene:
             # Full pipeline: registration + placement
-            R_str, t_str = processor.run_full_pipeline(
+            R_str, t_str, confidence_score = processor.run_full_pipeline(
                 args.source, args.reference, args.scene, args.output, 
                 visualize_and_save_results=not args.no_save)
             
             print(f"\nFinal transformation in R,t format:")
             print(f"R: {R_str}")
             print(f"t: {t_str}")
+            print(f"Registration confidence: {confidence_score:.3f}")
         else:
             # Registration only
-            R_str, t_str, source_center, reference_center = processor.run_registration_only(args.source, args.reference)
+            R_str, t_str, source_center, reference_center, confidence_score = processor.run_registration_only(args.source, args.reference)
+            print(f"Registration confidence: {confidence_score:.3f}")
     except Exception as e:
         print(f"Error: {str(e)}")
         import traceback

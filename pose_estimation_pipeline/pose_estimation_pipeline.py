@@ -98,11 +98,12 @@ class pose_estimation_pipeline:
                     'label': object_info['label'],
                     'success': False,
                     'error': 'Reference model not found',
-                    'transformation': None
+                    'transformation': None,
+                    'confidence_score': None
                 }
             
-            # Run registration
-            transformation = register_pcl.run_full_pipeline(
+            # Run registration - now returns R_str, t_str, confidence_score
+            R_str, t_str, confidence_score = register_pcl.run_full_pipeline(
                 source_pcl=object_pcl,
                 reference_file_path=reference_model_path,
                 scene_pcl=scene_pcl,
@@ -110,13 +111,18 @@ class pose_estimation_pipeline:
                 visualize_and_save_results=config["registration_visualization_and_save"]
             )
             
+            # Combine R_str and t_str into transformation (if needed for backward compatibility)
+            transformation = (R_str, t_str)
+            
             print(f"[Object {object_index}] Registration completed for: {object_info['label']}")
+            print(f"[Object {object_index}] Confidence score: {confidence_score}")
             
             return {
                 'object_index': object_index,
                 'label': object_info['label'],
                 'success': True,
                 'transformation': transformation,
+                'confidence_score': confidence_score,
                 'object_info': object_info,
                 'output_file': output_file
             }
@@ -129,7 +135,8 @@ class pose_estimation_pipeline:
                 'label': object_info['label'],
                 'success': False,
                 'error': str(e),
-                'transformation': None
+                'transformation': None,
+                'confidence_score': None
             }
 
     def register_all_objects_parallel(self, extracted_clouds_list, scene_pcl, max_workers=None):
@@ -207,6 +214,7 @@ class pose_estimation_pipeline:
                 print(f"  - Object {result['object_index']}: {result['label']}")
                 if result['transformation'] is not None:
                     print(f"    Transformation: {result['transformation']}")
+                    print(f"    Score: {result['confidence_score']}")
         
         if failed:
             print(f"\n✗ FAILED REGISTRATIONS:")
@@ -304,6 +312,7 @@ class pose_estimation_pipeline:
                     'object_index': result['object_index'],
                     'label': result['label'],
                     'transformation': result['transformation'].tolist() if hasattr(result['transformation'], 'tolist') else result['transformation'],
+                    'confidence_score': result['confidence_score'],
                     'output_file': result['output_file']
                 })
 
