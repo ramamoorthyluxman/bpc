@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation
 import os
 import argparse
 import sys
+from PIL import Image
 
 class PointCloudProcessor:
     def __init__(self):
@@ -48,8 +49,6 @@ class PointCloudProcessor:
             confidence_score: Float between 0 and 1 (higher is better)
             confidence_details: Dictionary with detailed confidence metrics
         """
-        print("Computing registration confidence score...")
-        
         # Apply final transformation to source
         source_transformed = copy.deepcopy(source_processed)
         source_transformed.transform(final_transform)
@@ -106,7 +105,6 @@ class PointCloudProcessor:
             geometry_score = min(1.0, overlap_ratio)
             
         except Exception as e:
-            print(f"Warning: Could not compute geometric consistency: {str(e)}")
             geometry_score = 0.5
         
         # 5. Transformation reasonableness check
@@ -132,7 +130,6 @@ class PointCloudProcessor:
                 transform_score *= 0.9
                 
         except Exception as e:
-            print(f"Warning: Could not validate transformation: {str(e)}")
             transform_score = 0.8
         
         # Combine all components with weights
@@ -169,13 +166,6 @@ class PointCloudProcessor:
             },
             'weights': weights
         }
-        
-        print(f"Registration confidence: {confidence_score:.3f}")
-        print(f"  Fitness component: {fitness_score:.3f}")
-        print(f"  RMSE component: {rmse_score:.3f}")
-        print(f"  Convergence component: {convergence_score:.3f}")
-        print(f"  Geometry component: {geometry_score:.3f}")
-        print(f"  Transform component: {transform_score:.3f}")
         
         return confidence_score, confidence_details
     
@@ -224,8 +214,6 @@ class PointCloudProcessor:
                 f.write("  * Consider multi-scale registration\n")
             else:
                 f.write("- Registration quality is good to excellent\n")
-        
-        print(f"Confidence report saved to {confidence_file}")
 
     def transform_to_rt_format(self, transform):
         """
@@ -265,8 +253,6 @@ class PointCloudProcessor:
         with open(filename, 'w') as f:
             f.write(R_str + '\n')
             f.write(t_str + '\n')
-        
-        print(f"Transformation saved in R,t format to {filename}")
     
     def load_transformation_rt_format(self, filename):
         """
@@ -294,17 +280,13 @@ class PointCloudProcessor:
         transform[:3, :3] = R
         transform[:3, 3] = t
         
-        print(f"Transformation loaded from R,t format file: {filename}")
         return transform
         
     def load_point_clouds(self, source_file, reference_file, scene_file=None):
         """Load all point clouds"""
-        print(f"Loading source point cloud (ROI): {source_file}")
         source = o3d.io.read_point_cloud(source_file)
         source_center = np.mean(np.asarray(source.points), axis=0)
-        print(f"Source point cloud has {len(source.points)} points with center at {source_center}")
         
-        print(f"Loading reference model: {reference_file}")
         if reference_file.endswith('.ply'):
             # Load reference as point cloud
             reference = o3d.io.read_point_cloud(reference_file)
@@ -313,30 +295,24 @@ class PointCloudProcessor:
             try:
                 reference_mesh = o3d.io.read_triangle_mesh(reference_file)
                 if len(reference_mesh.triangles) > 0:
-                    print(f"Reference loaded as mesh with {len(reference_mesh.triangles)} triangles")
                     # If it's a proper mesh, sample points for registration
                     if len(reference_mesh.vertices) > self.reference_points:
                         reference_for_reg = reference_mesh.sample_points_uniformly(self.reference_points)
-                        print(f"Sampled {self.reference_points} points from mesh for registration")
                     else:
                         reference_for_reg = reference
                 else:
                     reference_for_reg = reference
             except Exception as e:
-                print(f"Could not load reference as mesh: {str(e)}")
                 reference_for_reg = reference
         else:
             reference = o3d.io.read_point_cloud(reference_file)
             reference_for_reg = reference
         
         reference_center = np.mean(np.asarray(reference_for_reg.points), axis=0)
-        print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
         
         # Load scene if provided
         if scene_file:
-            print(f"Loading scene point cloud: {scene_file}")
             scene = o3d.io.read_point_cloud(scene_file)
-            print(f"Scene point cloud has {len(scene.points)} points")
         else:
             scene = None
         
@@ -345,10 +321,8 @@ class PointCloudProcessor:
     def downsample_point_cloud(self, pcd, target_points, name="point cloud"):
         """Downsample point cloud to target number of points"""
         original_points = len(pcd.points)
-        print(f"Adaptively downsampling {name} from {original_points} points to ~{target_points} points")
         
         if original_points <= target_points:
-            print(f"No downsampling needed for {name}")
             return copy.deepcopy(pcd)
         
         # Calculate voxel size to achieve target point count (approximation)
@@ -356,7 +330,6 @@ class PointCloudProcessor:
         voxel_size = 0.01 * (reduction_factor ** (1/3))
         
         # Try voxel downsampling first
-        print(f"Trying voxel downsampling with size {voxel_size:.6f}...")
         downsampled = pcd.voxel_down_sample(voxel_size)
         current_points = len(downsampled.points)
 
@@ -366,7 +339,6 @@ class PointCloudProcessor:
         
         # If we're still over the limit, use random sampling as fallback
         if current_points > target_points:
-            print(f"Voxel downsampling not sufficient, using random sampling...")
             indices = np.random.choice(current_points, target_points, replace=False)
             points = np.asarray(downsampled.points)[indices]
             
@@ -381,159 +353,140 @@ class PointCloudProcessor:
             
             downsampled = random_sampled
         
-        print(f"Downsampled {name} to {len(downsampled.points)} points")
         return downsampled
     
-    def preprocess_for_registration(self, pcd, name="point cloud", save_visualizations=True):
+    def preprocess_for_registration(self, pcd, name="point cloud"):
         """Prepare point cloud for registration"""
-        print(f"Preprocessing {name} for registration...")
-        
         # Make a copy to avoid modifying the original
         processed = copy.deepcopy(pcd)
         
         # Store original center
         original_center = np.mean(np.asarray(processed.points), axis=0)
         
-        if save_visualizations:
-            # Visualize the input point cloud with its center
-            vis_input = copy.deepcopy(processed)
-            input_frame = self._create_coordinate_frame(original_center, size=0.05)
-            vis_input.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(vis_input.points), np.asarray(input_frame.points))))
-            if len(vis_input.colors) > 0:
-                # Create default coloring if needed
-                if len(vis_input.colors) == 0:
-                    vis_input.paint_uniform_color([0.7, 0.7, 0.7])
-                vis_input.colors = o3d.utility.Vector3dVector(
-                    np.vstack((np.asarray(vis_input.colors), np.asarray(input_frame.colors))))
-            else:
-                vis_input.paint_uniform_color([0.7, 0.7, 0.7])
-                # Add frame colors
-                colors = np.ones((len(vis_input.points) - 4, 3)) * 0.7  # Default gray for points
-                colors = np.vstack((colors, np.asarray(input_frame.colors)))
-                vis_input.colors = o3d.utility.Vector3dVector(colors)
-            
-            vis_filename = os.path.join(self.output_dir, f'preprocess_input_{name}.pcd')
-            o3d.io.write_point_cloud(vis_filename, vis_input, write_ascii=False, compressed=True)
-        
         # Center the point cloud
         processed.points = o3d.utility.Vector3dVector(
             np.asarray(processed.points) - original_center)
-        
-        if save_visualizations:
-            # Save the centered point cloud
-            centered = copy.deepcopy(processed)
-            centered_frame = self._create_coordinate_frame(np.zeros(3), size=0.05)
-            centered.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(centered.points), np.asarray(centered_frame.points))))
-            if len(centered.colors) > 0:
-                centered.colors = o3d.utility.Vector3dVector(
-                    np.vstack((np.asarray(centered.colors), np.asarray(centered_frame.colors))))
-            else:
-                centered.paint_uniform_color([0.7, 0.7, 0.7])
-                # Add frame colors
-                colors = np.ones((len(centered.points) - 4, 3)) * 0.7  # Default gray for points
-                colors = np.vstack((colors, np.asarray(centered_frame.colors)))
-                centered.colors = o3d.utility.Vector3dVector(colors)
-            
-            vis_filename = os.path.join(self.output_dir, f'preprocess_centered_{name}.pcd')
-            o3d.io.write_point_cloud(vis_filename, centered, write_ascii=False, compressed=True)
         
         # Scale normalization
         points = np.asarray(processed.points)
         scale = np.max([np.linalg.norm(points, axis=1).max(), 1e-8])
         processed.points = o3d.utility.Vector3dVector(points / scale)
         
-        if save_visualizations:
-            # Save the scaled point cloud
-            scaled = copy.deepcopy(processed)
-            scaled_frame = self._create_coordinate_frame(np.zeros(3), size=0.05)
-            scaled.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(scaled.points), np.asarray(scaled_frame.points))))
-            if len(scaled.colors) > 0:
-                scaled.colors = o3d.utility.Vector3dVector(
-                    np.vstack((np.asarray(scaled.colors), np.asarray(scaled_frame.colors))))
-            else:
-                scaled.paint_uniform_color([0.7, 0.7, 0.7])
-                # Add frame colors
-                colors = np.ones((len(scaled.points) - 4, 3)) * 0.7  # Default gray for points
-                colors = np.vstack((colors, np.asarray(scaled_frame.colors)))
-                scaled.colors = o3d.utility.Vector3dVector(colors)
-            
-            vis_filename = os.path.join(self.output_dir, f'preprocess_scaled_{name}.pcd')
-            o3d.io.write_point_cloud(vis_filename, scaled, write_ascii=False, compressed=True)
-        
         # Voxel downsampling
-        print(f"Downsampling with voxel size: {self.voxel_size}")
         downsampled = processed.voxel_down_sample(self.voxel_size)
         
         # Statistical outlier removal for noise handling
-        print(f"Removing outliers with {self.nb_neighbors} neighbors and {self.std_ratio} std ratio")
         cleaned, ind = downsampled.remove_statistical_outlier(
             nb_neighbors=self.nb_neighbors, std_ratio=self.std_ratio)
         
         # Estimate normals for feature computation
-        print("Estimating normals...")
         cleaned.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(
             radius=self.voxel_size * 2, max_nn=30))
         
         # Compute FPFH features
-        print("Computing FPFH features...")
         features = o3d.pipelines.registration.compute_fpfh_feature(
             cleaned, o3d.geometry.KDTreeSearchParamHybrid(radius=self.voxel_size * 5, max_nn=100))
         
-        if save_visualizations:
-            # Save the final processed point cloud
-            final = copy.deepcopy(cleaned)
-            final_frame = self._create_coordinate_frame(np.zeros(3), size=0.05)
-            final.points = o3d.utility.Vector3dVector(
-                np.vstack((np.asarray(final.points), np.asarray(final_frame.points))))
-            if len(final.colors) > 0:
-                final.colors = o3d.utility.Vector3dVector(
-                    np.vstack((np.asarray(final.colors), np.asarray(final_frame.colors))))
-            else:
-                final.paint_uniform_color([0.7, 0.7, 0.7])
-                # Add frame colors
-                colors = np.ones((len(final.points) - 4, 3)) * 0.7  # Default gray for points
-                colors = np.vstack((colors, np.asarray(final_frame.colors)))
-                final.colors = o3d.utility.Vector3dVector(colors)
-            
-            vis_filename = os.path.join(self.output_dir, f'preprocess_final_{name}.pcd')
-            o3d.io.write_point_cloud(vis_filename, final, write_ascii=False, compressed=True)
-            
-            # Save preprocessing details
-            details_file = os.path.join(self.output_dir, f'preprocess_details_{name}.txt')
-            with open(details_file, 'w') as f:
-                f.write(f"Preprocessing Details for {name}\n")
-                f.write("================================\n\n")
-                f.write(f"Original center: {original_center}\n")
-                f.write(f"Normalization scale: {scale}\n")
-                f.write(f"Original point count: {len(pcd.points)}\n")
-                f.write(f"After downsampling: {len(downsampled.points)}\n")
-                f.write(f"After outlier removal: {len(cleaned.points)}\n")
-            
-            print(f"Preprocessing details saved to {details_file}")
-        
         return cleaned, features, scale, original_center
     
-    def register_point_clouds(self, source, target, save_visualizations=True):
+    def create_3part_2d_visualization(self, reference_original, source_original, reference_transformed):
+        """
+        Create a 3-part 2D visualization showing:
+        Left: Neutral pose of reference model
+        Center: Source pose 
+        Right: Transformed pose of reference model
+        """
+        print("Creating 3-part 2D visualization...")
+        
+        # Extract points and debug
+        ref_points = np.asarray(reference_original.points)
+        src_points = np.asarray(source_original.points)
+        trans_points = np.asarray(reference_transformed.points)
+        
+        print(f"Point counts - Reference: {len(ref_points)}, Source: {len(src_points)}, Transformed: {len(trans_points)}")
+        
+        if len(ref_points) == 0 or len(src_points) == 0 or len(trans_points) == 0:
+            print("Error: One or more point clouds are empty!")
+            return None
+        
+        # Use XY projection (front view) - most common and reliable
+        ref_2d = ref_points[:, [0, 1]]
+        src_2d = src_points[:, [0, 1]]
+        trans_2d = trans_points[:, [0, 1]]
+        
+        # Calculate overall bounds for consistent scaling
+        all_2d = np.vstack([ref_2d, src_2d, trans_2d])
+        x_min, x_max = all_2d[:, 0].min(), all_2d[:, 0].max()
+        y_min, y_max = all_2d[:, 1].min(), all_2d[:, 1].max()
+        
+        # Add padding
+        x_range = x_max - x_min if x_max != x_min else 1.0
+        y_range = y_max - y_min if y_max != y_min else 1.0
+        padding = 0.1
+        x_pad = max(x_range * padding, 0.01)
+        y_pad = max(y_range * padding, 0.01)
+        
+        xlims = [x_min - x_pad, x_max + x_pad]
+        ylims = [y_min - y_pad, y_max + y_pad]
+        
+        # Create individual plots that we know work
+        plot_configs = [
+            (ref_2d, 'reference', 'green', 'Reference Model\n(Neutral Pose)'),
+            (src_2d, 'source', 'red', 'Source Point Cloud\n(Target Pose)'),
+            (trans_2d, 'transformed', 'blue', 'Reference Model\n(Transformed Pose)')
+        ]
+        
+        individual_files = []
+        
+        for points_2d, name, color, title in plot_configs:
+            plt.figure(figsize=(6, 6))
+            plt.scatter(points_2d[:, 0], points_2d[:, 1], c=color, s=15, alpha=0.8)
+            plt.title(title, fontsize=14, fontweight='bold')
+            plt.xlabel('X')
+            plt.ylabel('Y')
+            plt.grid(True, alpha=0.3)
+            plt.xlim(xlims)
+            plt.ylim(ylims)
+            
+            individual_file = os.path.join(self.output_dir, f'{name}_individual.png')
+            plt.savefig(individual_file, dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close()
+            individual_files.append(individual_file)
+            print(f"Individual {name} plot saved to {individual_file}")
+        
+        # Now combine the three working images side by side
+        print("Combining individual images...")
+        
+        # Load the three images
+        img1 = Image.open(individual_files[0])  # reference
+        img2 = Image.open(individual_files[1])  # source  
+        img3 = Image.open(individual_files[2])  # transformed
+        
+        # Get dimensions (they should all be the same)
+        width, height = img1.size
+        
+        # Create new image with triple width
+        combined_img = Image.new('RGB', (width * 3, height), 'white')
+        
+        # Paste the three images side by side
+        combined_img.paste(img1, (0, 0))
+        combined_img.paste(img2, (width, 0))
+        combined_img.paste(img3, (width * 2, 0))
+        
+        # Save the combined image
+        vis_filename = os.path.join(self.output_dir, 'registration_comparison_2d.png')
+        combined_img.save(vis_filename)
+        
+        print(f"Combined 3-part visualization saved to {vis_filename}")
+        return vis_filename
+    
+    def register_point_clouds(self, source, target):
         """Perform registration between source and target point clouds"""
         print("Starting registration process...")
         
-        if save_visualizations:
-            # Run initial debugging on the input point clouds
-            self.debug_registration_process(source, target)
-            
-            # Save visualization before registration
-            self.visualize_registration(source, target, step="before")
-        
         # Preprocess point clouds
-        source_processed, source_feat, source_scale, source_center = self.preprocess_for_registration(source, "source", save_visualizations)
-        target_processed, target_feat, target_scale, target_center = self.preprocess_for_registration(target, "target", save_visualizations)
-        
-        if save_visualizations:
-            # Also visualize the preprocessed (normalized) point clouds
-            self.visualize_registration(source_processed, target_processed, step="preprocessed")
+        source_processed, source_feat, source_scale, source_center = self.preprocess_for_registration(source, "source")
+        target_processed, target_feat, target_scale, target_center = self.preprocess_for_registration(target, "target")
         
         # Global registration (RANSAC)
         print("RANSAC Global Registration...")
@@ -555,11 +508,6 @@ class PointCloudProcessor:
         print(f"RANSAC Fitness: {result.fitness}")
         print(f"RANSAC RMSE: {result.inlier_rmse}")
         
-        # Store transformations for our sequence visualization
-        if save_visualizations:
-            transforms = [result.transformation]
-            transform_names = ["After RANSAC"]
-        
         # Save results for progress tracking
         self.fitness_history = [result.fitness]
         self.rmse_history = [result.inlier_rmse]
@@ -575,8 +523,6 @@ class PointCloudProcessor:
         # Iterative ICP
         self.convergence_iterations = 0
         for i in range(self.icp_max_iter):
-            print(f"ICP iteration {i+1}/{self.icp_max_iter}")
-            
             # Run one ICP iteration
             result = o3d.pipelines.registration.registration_icp(
                 source_transformed, target_processed, 
@@ -598,17 +544,8 @@ class PointCloudProcessor:
             self.rmse_history.append(result.inlier_rmse)
             self.convergence_iterations = i + 1
             
-            if save_visualizations:
-                # Save major steps in the transform sequence
-                if i == 0 or i == 4 or i == 9 or i == 19 or i == self.icp_max_iter-1:
-                    transforms.append(current_transform)
-                    transform_names.append(f"After ICP iteration {i+1}")
-            
             # Check for convergence
             if i > 0 and abs(self.fitness_history[-1] - self.fitness_history[-2]) < 1e-10:
-                if save_visualizations and i not in [0, 4, 9, 19]:
-                    transforms.append(current_transform)
-                    transform_names.append(f"Final (ICP iteration {i+1})")
                 print(f"ICP converged after {i+1} iterations")
                 break
         
@@ -623,410 +560,11 @@ class PointCloudProcessor:
         confidence_score, confidence_details = self.compute_registration_confidence(
             source_processed, target_processed, final_transform_processed)
         
-        if save_visualizations:
-            # Save confidence report
-            self.save_confidence_report(confidence_score, confidence_details)
-            
-            # Add the final scaled-back transform
-            transforms.append(final_transform)
-            transform_names.append("Final (after scaling)")
-            
-            # Create sequence visualization
-            self.visualize_transform_sequence(source_processed, target_processed, 
-                                            transforms[:-1], transform_names[:-1])
-            
-            # Also create a sequence visualization on original (unprocessed) point clouds
-            self.visualize_transform_sequence(source, target, [final_transform], ["Final Transform"])
-            
-            # Debug the final transformation
-            self.debug_registration_process(source, target, final_transform)
-            
-            # Save visualization after registration
-            self.visualize_registration(source, target, final_transform, step="after")
+        # Save confidence report
+        self.save_confidence_report(confidence_score, confidence_details)
         
         return final_transform, source_center, target_center, confidence_score
     
-    def visualize_transform_sequence(self, source, target, transforms, names):
-        """
-        Visualize a sequence of transformations applied to the source point cloud.
-        
-        Args:
-            source: Original source point cloud
-            target: Target point cloud
-            transforms: List of transformation matrices
-            names: List of transformation names/descriptions
-        """
-        assert len(transforms) == len(names), "Number of transforms must match number of names"
-        
-        # Create a multi-stage visualization
-        all_points = []
-        all_colors = []
-        
-        # Add the target point cloud (reference) in green
-        target_copy = copy.deepcopy(target)
-        target_copy.paint_uniform_color([0, 1, 0])
-        all_points.append(np.asarray(target_copy.points))
-        all_colors.append(np.asarray(target_copy.colors))
-        
-        # Create a color gradient for source transforms from blue to red
-        colors = []
-        for i in range(len(transforms)):
-            # Gradient from blue to red
-            r = i / (len(transforms) - 1) if len(transforms) > 1 else 1.0
-            b = 1.0 - r
-            colors.append([r, 0, b])
-        
-        # Apply each transformation to the source
-        for i, (transform, name) in enumerate(zip(transforms, names)):
-            source_copy = copy.deepcopy(source)
-            source_copy.transform(transform)
-            source_copy.paint_uniform_color(colors[i])
-            
-            all_points.append(np.asarray(source_copy.points))
-            all_colors.append(np.asarray(source_copy.colors))
-        
-        # Combine all point clouds
-        combined = o3d.geometry.PointCloud()
-        combined.points = o3d.utility.Vector3dVector(np.vstack(all_points))
-        combined.colors = o3d.utility.Vector3dVector(np.vstack(all_colors))
-        
-        # Save the visualization
-        vis_filename = os.path.join(self.output_dir, 'transform_sequence.pcd')
-        o3d.io.write_point_cloud(vis_filename, combined, write_ascii=False, compressed=True)
-        
-        # Create a legend text file
-        legend_file = os.path.join(self.output_dir, 'transform_sequence_legend.txt')
-        with open(legend_file, 'w') as f:
-            f.write("Transform Sequence Visualization Legend\n")
-            f.write("=====================================\n\n")
-            f.write("Green: Target/Reference point cloud\n")
-            
-            for i, name in enumerate(names):
-                r = i / (len(names) - 1) if len(names) > 1 else 1.0
-                b = 1.0 - r
-                f.write(f"RGB({int(r*255)}, 0, {int(b*255)}): {name}\n")
-        
-        print(f"Transform sequence visualization saved to {vis_filename}")
-        print(f"Legend saved to {legend_file}")
-    
-
-    def visualize_transformation(self, transform, source_center, target_center):
-        """
-        Visualize the transformation by creating coordinate frames
-        and showing how the transformation maps source to target space.
-        """
-        # Create a text file with transformation details
-        transform_viz_file = os.path.join(self.output_dir, 'transformation_visualization.txt')
-        
-        # Extract rotation and translation
-        rotation = transform[:3, :3]
-        translation = transform[:3, 3]
-        euler_angles = Rotation.from_matrix(rotation).as_euler('xyz', degrees=True)
-        
-        with open(transform_viz_file, 'w') as f:
-            f.write("Transformation Visualization\n")
-            f.write("===========================\n\n")
-            f.write(f"Source center: {source_center[0]:.4f}, {source_center[1]:.4f}, {source_center[2]:.4f}\n")
-            f.write(f"Target center: {target_center[0]:.4f}, {target_center[1]:.4f}, {target_center[2]:.4f}\n\n")
-            f.write("Transformation Matrix:\n")
-            f.write(np.array_str(transform, precision=6))
-            f.write("\n\n")
-            f.write("Decomposed Transformation:\n")
-            f.write(f"Translation (x, y, z): {translation[0]:.6f}, {translation[1]:.6f}, {translation[2]:.6f}\n")
-            f.write(f"Rotation (Euler angles in degrees, xyz): {euler_angles[0]:.6f}, {euler_angles[1]:.6f}, {euler_angles[2]:.6f}\n")
-        
-        print(f"Transformation visualization saved to {transform_viz_file}")
-        
-        # Create coordinate frames as point clouds and save them
-        # This will create source, target, and transformed source coordinate frames
-        self.visualize_coordinate_frames(transform, source_center, target_center)
-
-    def visualize_coordinate_frames(self, transform, source_center, target_center):
-        """
-        Create a visualization of coordinate frames before and after transformation.
-        """
-        # Create coordinate frame point clouds
-        def create_coordinate_frame(center, size=0.1, color_type="rgb"):
-            points = []
-            colors = []
-            
-            # Origin
-            points.append(center)
-            colors.append([0.5, 0.5, 0.5])  # Gray for origin
-            
-            # X axis (red)
-            points.append(center + np.array([size, 0, 0]))
-            colors.append([1, 0, 0])
-            
-            # Y axis (green)
-            points.append(center + np.array([0, size, 0]))
-            colors.append([0, 1, 0])
-            
-            # Z axis (blue)
-            points.append(center + np.array([0, 0, size]))
-            colors.append([0, 0, 1])
-            
-            frame = o3d.geometry.PointCloud()
-            frame.points = o3d.utility.Vector3dVector(np.array(points))
-            frame.colors = o3d.utility.Vector3dVector(np.array(colors))
-            return frame
-        
-        # Create source frame
-        source_frame = create_coordinate_frame(source_center, size=0.05)
-        
-        # Create target frame
-        target_frame = create_coordinate_frame(target_center, size=0.05)
-        
-        # Create transformed source frame
-        # First, we need to create a transformation that includes the centers
-        T_src = np.eye(4)
-        T_src[:3, 3] = source_center
-        
-        T_transform = np.eye(4)
-        T_transform[:3, :3] = transform[:3, :3]
-        T_transform[:3, 3] = transform[:3, 3]
-        
-        T_combined = np.matmul(T_transform, T_src)
-        transformed_center = T_combined[:3, 3]
-        
-        # Create the transformed frame
-        transformed_frame = create_coordinate_frame(transformed_center, size=0.05)
-        
-        # Combine all frames
-        all_frames = o3d.geometry.PointCloud()
-        all_frames.points = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(source_frame.points), 
-                    np.asarray(target_frame.points),
-                    np.asarray(transformed_frame.points))))
-        all_frames.colors = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(source_frame.colors),
-                    np.asarray(target_frame.colors),
-                    np.asarray(transformed_frame.colors))))
-        
-        # Save the visualization
-        frames_filename = os.path.join(self.output_dir, 'coordinate_frames.pcd')
-        o3d.io.write_point_cloud(frames_filename, all_frames, write_ascii=False, compressed=True)
-        print(f"Coordinate frames visualization saved to {frames_filename}")
-                
-    
-
-    def visualize_registration(self, source, reference, transform=None, step="before"):
-        """
-        Visualize the registration between source and reference point clouds.
-        
-        Args:
-            source: Source point cloud (ROI)
-            reference: Reference point cloud
-            transform: Optional transformation matrix to apply to source
-            step: String indicating registration step ("before" or "after")
-        """
-        print(f"Creating visualization for {step} registration...")
-        
-        # Create copies to avoid modifying originals
-        source_vis = copy.deepcopy(source)
-        reference_vis = copy.deepcopy(reference)
-        
-        # For visualization clarity, ensure both point clouds are centered
-        # This helps when the clouds are far apart in their original spaces
-        if step == "before":
-            # For "before" visualization, center both clouds at the origin
-            # to see their relative shapes before alignment
-            source_center = np.mean(np.asarray(source_vis.points), axis=0)
-            reference_center = np.mean(np.asarray(reference_vis.points), axis=0)
-            
-            # Center both clouds for better visualization
-            source_vis.points = o3d.utility.Vector3dVector(
-                np.asarray(source_vis.points) - source_center)
-            reference_vis.points = o3d.utility.Vector3dVector(
-                np.asarray(reference_vis.points) - reference_center)
-            
-            # Log the centering operations for debugging
-            print(f"Centering source from {source_center} and reference from {reference_center} for visualization")
-        
-        # Apply transformation if provided (for "after" step)
-        if transform is not None and step == "after":
-            # For "after" visualization, apply the transformation
-            # but don't pre-center the clouds as we want to see the actual transformation result
-            source_vis.transform(transform)
-            
-            # Log transformation details
-            rotation = transform[:3, :3]
-            translation = transform[:3, 3]
-            euler_angles = Rotation.from_matrix(rotation).as_euler('xyz', degrees=True)
-            print(f"Applied transformation to source with:")
-            print(f"  Translation: {translation}")
-            print(f"  Rotation (Euler angles in degrees): {euler_angles}")
-        
-        # Color the point clouds distinctly
-        source_vis.paint_uniform_color([1, 0, 0])       # Red for source/ROI
-        reference_vis.paint_uniform_color([0, 1, 0])    # Green for reference
-        
-        # Add coordinate frames to visualize orientation
-        frame_size = max(
-            np.ptp(np.asarray(source_vis.points), axis=0).max(),
-            np.ptp(np.asarray(reference_vis.points), axis=0).max()
-        ) * 0.1  # 10% of the largest dimension
-        
-        source_frame = self._create_coordinate_frame(
-            np.mean(np.asarray(source_vis.points), axis=0), size=frame_size)
-        reference_frame = self._create_coordinate_frame(
-            np.mean(np.asarray(reference_vis.points), axis=0), size=frame_size)
-        
-        # Combine the point clouds and frames
-        combined = o3d.geometry.PointCloud()
-        combined.points = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(source_vis.points), 
-                    np.asarray(reference_vis.points),
-                    np.asarray(source_frame.points),
-                    np.asarray(reference_frame.points))))
-        combined.colors = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(source_vis.colors), 
-                    np.asarray(reference_vis.colors),
-                    np.asarray(source_frame.colors),
-                    np.asarray(reference_frame.colors))))
-        
-        # Save the visualization
-        vis_filename = os.path.join(self.output_dir, f'registration_vis_{step}.pcd')
-        o3d.io.write_point_cloud(vis_filename, combined, write_ascii=False, compressed=True)
-        print(f"Registration visualization saved to {vis_filename}")
-        
-        # Save individual clouds for detailed inspection
-        src_filename = os.path.join(self.output_dir, f'source_{step}.pcd')
-        ref_filename = os.path.join(self.output_dir, f'reference_{step}.pcd')
-        o3d.io.write_point_cloud(src_filename, source_vis, write_ascii=False, compressed=True)
-        o3d.io.write_point_cloud(ref_filename, reference_vis, write_ascii=False, compressed=True)
-        
-        return combined
-
-    def _create_coordinate_frame(self, center, size=0.1):
-        """
-        Create a coordinate frame point cloud at the specified center.
-        """
-        points = []
-        colors = []
-        
-        # Origin
-        points.append(center)
-        colors.append([0.5, 0.5, 0.5])  # Gray for origin
-        
-        # X axis (red)
-        points.append(center + np.array([size, 0, 0]))
-        colors.append([1, 0, 0])
-        
-        # Y axis (green)
-        points.append(center + np.array([0, size, 0]))
-        colors.append([0, 1, 0])
-        
-        # Z axis (blue)
-        points.append(center + np.array([0, 0, size]))
-        colors.append([0, 0, 1])
-        
-        frame = o3d.geometry.PointCloud()
-        frame.points = o3d.utility.Vector3dVector(np.array(points))
-        frame.colors = o3d.utility.Vector3dVector(np.array(colors))
-        return frame
-    
-    def debug_registration_process(self, source, target, transform=None):
-        """
-        Detailed debugging of the registration process to identify issues.
-        """
-        debug_file = os.path.join(self.output_dir, 'registration_debug.txt')
-        
-        with open(debug_file, 'w') as f:
-            # Basic statistics
-            source_points = np.asarray(source.points)
-            target_points = np.asarray(target.points)
-            
-            source_center = np.mean(source_points, axis=0)
-            target_center = np.mean(target_points, axis=0)
-            
-            source_min = np.min(source_points, axis=0)
-            source_max = np.max(source_points, axis=0)
-            target_min = np.min(target_points, axis=0)
-            target_max = np.max(target_points, axis=0)
-            
-            f.write("Registration Debug Information\n")
-            f.write("============================\n\n")
-            
-            f.write(f"Source Point Cloud Stats:\n")
-            f.write(f"  Number of points: {len(source_points)}\n")
-            f.write(f"  Center: {source_center}\n")
-            f.write(f"  Min bounds: {source_min}\n")
-            f.write(f"  Max bounds: {source_max}\n")
-            f.write(f"  Size (range): {source_max - source_min}\n\n")
-            
-            f.write(f"Target Point Cloud Stats:\n")
-            f.write(f"  Number of points: {len(target_points)}\n")
-            f.write(f"  Center: {target_center}\n")
-            f.write(f"  Min bounds: {target_min}\n")
-            f.write(f"  Max bounds: {target_max}\n")
-            f.write(f"  Size (range): {target_max - target_min}\n\n")
-            
-            # Analyze scale differences
-            source_scale = np.max([np.linalg.norm(source_points, axis=1).max(), 1e-8])
-            target_scale = np.max([np.linalg.norm(target_points, axis=1).max(), 1e-8])
-            
-            f.write(f"Scale Analysis:\n")
-            f.write(f"  Source scale: {source_scale}\n")
-            f.write(f"  Target scale: {target_scale}\n")
-            f.write(f"  Scale ratio (source/target): {source_scale/target_scale}\n\n")
-            
-            # Analyze the transformation if provided
-            if transform is not None:
-                f.write(f"Transformation Analysis:\n")
-                f.write(f"  Full matrix:\n{transform}\n\n")
-                
-                # Decompose transformation
-                rotation = transform[:3, :3]
-                translation = transform[:3, 3]
-                
-                # Check for reflection in the rotation matrix
-                det = np.linalg.det(rotation)
-                f.write(f"  Rotation determinant: {det}\n")
-                if abs(det - 1.0) > 1e-6:
-                    f.write(f"  WARNING: Rotation includes scaling or reflection!\n")
-                
-                # Check if rotation is orthogonal
-                orthogonality_error = np.linalg.norm(np.dot(rotation, rotation.T) - np.eye(3))
-                f.write(f"  Rotation orthogonality error: {orthogonality_error}\n")
-                if orthogonality_error > 1e-6:
-                    f.write(f"  WARNING: Rotation matrix is not orthogonal!\n")
-                
-                # Convert to Euler angles
-                try:
-                    euler_angles = Rotation.from_matrix(rotation).as_euler('xyz', degrees=True)
-                    f.write(f"  Euler angles (xyz, degrees): {euler_angles}\n")
-                except Exception as e:
-                    f.write(f"  ERROR computing Euler angles: {str(e)}\n")
-                
-                f.write(f"  Translation: {translation}\n")
-                
-                # Apply transform to source center and verify it approaches target center
-                transformed_center = np.dot(rotation, source_center) + translation
-                distance_between_centers = np.linalg.norm(transformed_center - target_center)
-                f.write(f"  Source center after transform: {transformed_center}\n")
-                f.write(f"  Distance between transformed source center and target center: {distance_between_centers}\n")
-                
-                if distance_between_centers > 0.5 * np.linalg.norm(target_max - target_min):
-                    f.write(f"  WARNING: Large distance between centers after transformation!\n")
-            
-            f.write("\nRecommendations:\n")
-            # Add recommendations based on analysis
-            if transform is not None and (orthogonality_error > 1e-6 or abs(det - 1.0) > 1e-6):
-                f.write("- Check the preprocessing normalization steps, especially centering and scaling\n")
-                f.write("- The current transformation includes non-rigid components which may distort the model\n")
-            
-            if transform is not None and distance_between_centers > 0.5 * np.linalg.norm(target_max - target_min):
-                f.write("- The centers are far apart after transformation, suggesting poor alignment\n")
-                f.write("- Consider using a different initial alignment strategy\n")
-                f.write("- Try increasing the number of RANSAC iterations\n")
-            
-            if abs(source_scale/target_scale - 1.0) > 0.5:
-                f.write("- Large scale difference between source and target\n")
-                f.write("- Consider explicit scaling normalization before registration\n")
-        
-        print(f"Detailed registration debug information saved to {debug_file}")
-        
     def place_reference_in_scene(self, reference, scene, transform_src_to_ref, source_center, reference_center):
         """Place reference model in scene with correct transformation"""
         print("Placing reference model in scene...")
@@ -1043,9 +581,6 @@ class PointCloudProcessor:
         
         # The complete transformation: T_src * T_ref_to_src * T_ref
         adjusted_transform = np.matmul(T_src, np.matmul(transform_ref_to_src, T_ref))
-        
-        print("Adjusted transformation matrix:")
-        print(np.array_str(adjusted_transform, precision=4))
         
         # Apply transformation to reference
         reference_transformed = copy.deepcopy(reference)
@@ -1067,8 +602,6 @@ class PointCloudProcessor:
         reference_bytes = len(reference_transformed.points) * 24  # RGB points
         scene_bytes = target_bytes - reference_bytes
         scene_points = max(1000, int(scene_bytes / 24))  # At least 1000 points
-
-        print("scene points: ", len(scene.points))
         
         print(f"Target file size: {self.max_file_size_mb} MB")
         print(f"Allocating {len(reference_transformed.points)} points to reference")
@@ -1079,8 +612,6 @@ class PointCloudProcessor:
             scene_downsampled = self.downsample_point_cloud(scene, scene_points, "scene")
         else:
             scene_downsampled = copy.deepcopy(scene)
-
-        print("downsampled scene points: ", len(scene_downsampled.points))
         
         # Combine point clouds
         combined = o3d.geometry.PointCloud()
@@ -1092,7 +623,7 @@ class PointCloudProcessor:
             combined.colors = o3d.utility.Vector3dVector(
                 np.vstack((np.asarray(reference_transformed.colors), np.asarray(scene_downsampled.colors))))
         
-        # Save result only if output_file is provided
+        # Save final registration.ply file
         if output_file:
             print(f"Saving combined result to {output_file}...")
             o3d.io.write_point_cloud(output_file, combined, write_ascii=False, compressed=True)
@@ -1192,7 +723,7 @@ class PointCloudProcessor:
         # Load or use provided point clouds
         if source_pcl is not None and reference_pcl is not None:
             # Use provided point cloud objects
-            print("Using provided point cloud objects...")
+            #print("Using provided point cloud objects...")
             source = copy.deepcopy(source_pcl)
             reference = copy.deepcopy(reference_pcl)
             reference_for_reg = copy.deepcopy(reference_pcl)
@@ -1201,8 +732,8 @@ class PointCloudProcessor:
             source_center = np.mean(np.asarray(source.points), axis=0)
             reference_center = np.mean(np.asarray(reference_for_reg.points), axis=0)
             
-            print(f"Source point cloud has {len(source.points)} points with center at {source_center}")
-            print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
+            #print(f"Source point cloud has {len(source.points)} points with center at {source_center}")
+            #print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
             
         else:
             # Load from files
@@ -1214,6 +745,13 @@ class PointCloudProcessor:
         
         # Register (now returns confidence score too)
         transform, source_center, reference_center, confidence_score = self.register_point_clouds(source, reference_for_reg)
+        
+        # Create transformed reference for visualization
+        reference_transformed = copy.deepcopy(reference)
+        reference_transformed.transform(transform)
+        
+        # Create 3-part 2D visualization
+        self.create_3part_2d_visualization(reference, source, reference_transformed)
         
         # Save transformation in R,t format
         rt_transform_file = os.path.join(self.output_dir, 'transformation_rt.txt')
@@ -1232,17 +770,17 @@ class PointCloudProcessor:
         # Plot metrics
         self.plot_registration_metrics()
         
-        print("\nRegistration completed successfully!")
-        print(f"Transformation matrix saved to {transform_file}")
-        print(f"Transformation R,t format saved to {rt_transform_file}")
-        print(f"Registration confidence: {confidence_score:.3f}")
+        #print("\nRegistration completed successfully!")
+        #print(f"Transformation matrix saved to {transform_file}")
+        #print(f"Transformation R,t format saved to {rt_transform_file}")
+        #print(f"Registration confidence: {confidence_score:.3f}")
         
         # Convert to R,t format for display and return
         R_str, t_str = self.transform_to_rt_format(transform)
         
-        print("\nTransformation in R,t format:")
-        print(f"R: {R_str}")
-        print(f"t: {t_str}")
+        #print("\nTransformation in R,t format:")
+        #print(f"R: {R_str}")
+        #print(f"t: {t_str}")
         
         # Return confidence score as well
         return R_str, t_str, source_center, reference_center, confidence_score
@@ -1281,48 +819,11 @@ class PointCloudProcessor:
         reference_transformed = self.place_reference_in_scene(
             reference, scene, transform, source_center, reference_center)
         
-        # Combine and reduce size
+        # Combine and reduce size - this creates the final registration.ply
         combined = self.combine_and_reduce_size(reference_transformed, scene, output_file)
         
         print("\nPlacement completed successfully!")
         print(f"Combined result saved to {output_file}")
-        
-        return combined
-    
-    def visualize_scene_placement(self, reference, scene, step="before"):
-        """
-        Visualize the placement of the reference in the scene.
-        
-        Args:
-            reference: Reference point cloud (original or transformed)
-            scene: Scene point cloud
-            step: String indicating placement step ("before" or "after")
-        """
-        print(f"Creating visualization for {step} placement...")
-        
-        # Create copies to avoid modifying originals
-        reference_vis = copy.deepcopy(reference)
-        scene_vis = copy.deepcopy(scene)
-        
-        # Color the point clouds distinctly
-        if step == "before":
-            reference_vis.paint_uniform_color([0, 1, 0])  # Green for reference before placement
-        else:
-            reference_vis.paint_uniform_color([1, 0.3, 0])  # Orange for reference after placement
-        
-        scene_vis.paint_uniform_color([0, 0, 1])  # Blue for scene
-        
-        # Combine the point clouds
-        combined = o3d.geometry.PointCloud()
-        combined.points = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(reference_vis.points), np.asarray(scene_vis.points))))
-        combined.colors = o3d.utility.Vector3dVector(
-            np.vstack((np.asarray(reference_vis.colors), np.asarray(scene_vis.colors))))
-        
-        # Save the visualization
-        vis_filename = os.path.join(self.output_dir, f'placement_vis_{step}.pcd')
-        o3d.io.write_point_cloud(vis_filename, combined, write_ascii=False, compressed=True)
-        print(f"Placement visualization saved to {vis_filename}")
         
         return combined
     
@@ -1344,8 +845,8 @@ class PointCloudProcessor:
         """
         
         # Use provided point cloud objects and load reference from file
-        print("Using provided source and scene point cloud objects...")
-        print(f"Loading reference model: {reference_file_path}")
+        #print("Using provided source and scene point cloud objects...")
+        #print(f"Loading reference model: {reference_file_path}")
         
         # Load reference from file
         if reference_file_path.endswith('.ply'):
@@ -1356,17 +857,17 @@ class PointCloudProcessor:
             try:
                 reference_mesh = o3d.io.read_triangle_mesh(reference_file_path)
                 if len(reference_mesh.triangles) > 0:
-                    print(f"Reference loaded as mesh with {len(reference_mesh.triangles)} triangles")
+                    #print(f"Reference loaded as mesh with {len(reference_mesh.triangles)} triangles")
                     # If it's a proper mesh, sample points for registration
                     if len(reference_mesh.vertices) > self.reference_points:
                         reference_for_reg = reference_mesh.sample_points_uniformly(self.reference_points)
-                        print(f"Sampled {self.reference_points} points from mesh for registration")
+                        #print(f"Sampled {self.reference_points} points from mesh for registration")
                     else:
                         reference_for_reg = reference
                 else:
                     reference_for_reg = reference
             except Exception as e:
-                print(f"Could not load reference as mesh: {str(e)}")
+                #print(f"Could not load reference as mesh: {str(e)}")
                 reference_for_reg = reference
         else:
             reference = o3d.io.read_point_cloud(reference_file_path)
@@ -1380,15 +881,21 @@ class PointCloudProcessor:
         source_center = np.mean(np.asarray(source.points), axis=0)
         reference_center = np.mean(np.asarray(reference_for_reg.points), axis=0)
         
-        print(f"Source point cloud has {len(source.points)} points with center at {source_center}")
-        print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
-        print(f"Scene point cloud has {len(scene.points)} points")
+        #print(f"Source point cloud has {len(source.points)} points with center at {source_center}")
+        #print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
+        #print(f"Scene point cloud has {len(scene.points)} points")
         
-        # Register with conditional visualization (now returns confidence score too)
-        transform, source_center, reference_center, confidence_score = self.register_point_clouds(
-            source, reference_for_reg, save_visualizations=visualize_and_save_results)
+        # Register (now returns confidence score too)
+        transform, source_center, reference_center, confidence_score = self.register_point_clouds(source, reference_for_reg)
         
         if visualize_and_save_results:
+            # Create transformed reference for visualization
+            reference_transformed_for_vis = copy.deepcopy(reference)
+            reference_transformed_for_vis.transform(transform)
+            
+            # Create 3-part 2D visualization
+            self.create_3part_2d_visualization(reference, source, reference_transformed_for_vis)
+            
             # Save transformation in R,t format
             rt_transform_file = os.path.join(self.output_dir, 'transformation_rt.txt')
             self.save_transformation_rt_format(transform, rt_transform_file)
@@ -1406,34 +913,25 @@ class PointCloudProcessor:
             # Plot metrics
             self.plot_registration_metrics()
             
-            print("\nRegistration completed. Proceeding with placement...")
-            print(f"Registration confidence: {confidence_score:.3f}")
-            
-            # Visualize reference and scene before placement
-            self.visualize_scene_placement(reference, scene, step="before")
+            #print("\nRegistration completed. Proceeding with placement...")
+            #print(f"Registration confidence: {confidence_score:.3f}")
         else:
             print("\nRegistration completed (visualization skipped). Proceeding with placement...")
             print(f"Registration confidence: {confidence_score:.3f}")
-
-        if visualize_and_save_results:        
-            # Place reference in scene
-            reference_transformed = self.place_reference_in_scene(
-                reference, scene, transform, source_center, reference_center)
         
-        if visualize_and_save_results:
-            # Visualize reference and scene after placement
-            self.visualize_scene_placement(reference_transformed, scene, step="after")
+        # Place reference in scene
+        reference_transformed = self.place_reference_in_scene(
+            reference, scene, transform, source_center, reference_center)
         
-            # Combine and reduce size (conditionally save to file)
-            output_file_param = output_file if visualize_and_save_results else None
-            combined = self.combine_and_reduce_size(reference_transformed, scene, output_file_param)
-        
+        # Combine and reduce size (conditionally save to file)
+        output_file_param = output_file if visualize_and_save_results else None
+        combined = self.combine_and_reduce_size(reference_transformed, scene, output_file_param)
         
         # Convert to R,t format for return
         R_str, t_str = self.transform_to_rt_format(transform)
         
         if visualize_and_save_results:
-            print("\nFull pipeline completed successfully!")
+            #print("\nFull pipeline completed successfully!")
             if output_file:
                 print(f"Combined result saved to {output_file}")
         else:
@@ -1458,7 +956,7 @@ def main():
     # Optional arguments
     parser.add_argument('--scene', type=str, help='Path to scene PCD file')
     parser.add_argument('--transform', type=str, help='Path to pre-computed transformation file (R,t format or 4x4 matrix)')
-    parser.add_argument('--output', type=str, default='combined_result.pcd', help='Output file path for combined result')
+    parser.add_argument('--output', type=str, default='registration.ply', help='Output file path for combined result')
     parser.add_argument('--output_dir', type=str, default='registration_results', help='Directory for output files')
     parser.add_argument('--max_size', type=float, default=10, help='Maximum file size in MB')
     parser.add_argument('--no_save', action='store_true', help='Skip saving visualizations and intermediate files')
@@ -1478,8 +976,12 @@ def main():
                 args.source, args.reference, args.scene, args.transform, args.output)
         elif args.scene:
             # Full pipeline: registration + placement
+            # Need to load point clouds as objects for the new interface
+            source_pcl = o3d.io.read_point_cloud(args.source)
+            scene_pcl = o3d.io.read_point_cloud(args.scene)
+            
             R_str, t_str, confidence_score = processor.run_full_pipeline(
-                args.source, args.reference, args.scene, args.output, 
+                source_pcl, args.reference, scene_pcl, args.output, 
                 visualize_and_save_results=not args.no_save)
             
             print(f"\nFinal transformation in R,t format:")
