@@ -6,7 +6,6 @@ maskrcnn_category_txt_path: "/home/rama/bpc_ws/bpc/maskRCNN/categories.txt"
 maskrcnn_visualization_and_save: false
 
 # Build 3D PCL
-pcl_builder_camera_parameters_path: "/home/rama/bpc_ws/bpc/ipd/camera_cam1.json"
 save_pcl: false
 
 # ROI Extraction
