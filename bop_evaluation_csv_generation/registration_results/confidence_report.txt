@@ -1,22 +1,22 @@
 Registration Confidence Report
 =============================
 
-Overall Confidence Score: 0.423
+Overall Confidence Score: 0.470
 Confidence Level: Medium (Acceptable registration)
 
 Detailed Metrics:
-  Final Fitness: 0.205246
-  Final RMSE: 0.062501
-  Normalized RMSE: 0.301438
-  Convergence Iterations: 15
-  Overlap Ratio: 0.033
+  Final Fitness: 0.334690
+  Final RMSE: 0.060502
+  Normalized RMSE: 0.421192
+  Convergence Iterations: 20
+  Overlap Ratio: 0.050
 
 Component Scores:
-  fitness_score: 0.205 (weight: 0.30)
-  rmse_score: 0.699 (weight: 0.25)
-  convergence_score: 0.409 (weight: 0.20)
-  geometry_score: 0.033 (weight: 0.15)
-  transform_score: 1.000 (weight: 0.10)
+  fitness_score: 0.335 (weight: 0.30)
+  rmse_score: 0.579 (weight: 0.25)
+  convergence_score: 0.639 (weight: 0.20)
+  geometry_score: 0.050 (weight: 0.15)
+  transform_score: 0.900 (weight: 0.10)
 
 Recommendations:
 - Registration quality is acceptable but could be improved:
