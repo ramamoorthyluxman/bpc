@@ -9,6 +9,7 @@ import concurrent.futures
 import multiprocessing
 from typing import List, Tuple, Dict, Any
 import threading
+import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'maskRCNN')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pcl_builder')))
@@ -87,8 +88,18 @@ class pose_estimation_pipeline:
                 f"object_{object_index}_{object_info['label']}_registration.ply"
             )
             
+            # Extract center_3d from object_info if available
+            center_3d = object_info.get('center_3d', None)
+
+            
             print(f"[Object {object_index}] Starting registration for: {object_info['label']}")
             print(f"[Object {object_index}] Reference model: {reference_model_path}")
+            print(f"[Object {object_index}] Object info keys: {list(object_info.keys())}")  # Debug print
+            
+            if center_3d is not None:
+                print(f"[Object {object_index}] Using provided 3D center: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
+            else:
+                print(f"[Object {object_index}] No 3D center provided, will use registration-estimated translation")
             
             # Check if reference model exists
             if not os.path.exists(reference_model_path):
@@ -102,13 +113,15 @@ class pose_estimation_pipeline:
                     'confidence_score': None
                 }
             
-            # Run registration - now returns R_str, t_str, confidence_score
+            # IMPORTANT: Pass center_3d explicitly to run_full_pipeline
+            print(f"[Object {object_index}] Calling registration with center_3d: {center_3d}")
             R_str, t_str, confidence_score = register_pcl.run_full_pipeline(
                 source_pcl=object_pcl,
                 reference_file_path=reference_model_path,
                 scene_pcl=scene_pcl,
                 output_file=output_file,
-                visualize_and_save_results=config["registration_visualization_and_save"]
+                visualize_and_save_results=config["registration_visualization_and_save"],
+                center_3d=center_3d  # THIS IS THE KEY PARAMETER
             )
             
             # Combine R_str and t_str into transformation (if needed for backward compatibility)
@@ -117,6 +130,9 @@ class pose_estimation_pipeline:
             print(f"[Object {object_index}] Registration completed for: {object_info['label']}")
             print(f"[Object {object_index}] Confidence score: {confidence_score}")
             
+            if center_3d is not None:
+                print(f"[Object {object_index}] Used provided center as translation")
+            
             return {
                 'object_index': object_index,
                 'label': object_info['label'],
@@ -124,7 +140,8 @@ class pose_estimation_pipeline:
                 'transformation': transformation,
                 'confidence_score': confidence_score,
                 'object_info': object_info,
-                'output_file': output_file
+                'output_file': output_file,
+                'used_provided_center': center_3d is not None
             }
             
         except Exception as e:
@@ -187,7 +204,8 @@ class pose_estimation_pipeline:
                 results.append(result)
                 
                 if result['success']:
-                    print(f"✓ Object {result['object_index']} ({result['label']}) registered successfully")
+                    center_info = " (used provided center)" if result.get('used_provided_center', False) else ""
+                    print(f"✓ Object {result['object_index']} ({result['label']}) registered successfully{center_info}")
                 else:
                     print(f"✗ Object {result['object_index']} ({result['label']}) registration failed: {result['error']}")
         
@@ -202,6 +220,7 @@ class pose_estimation_pipeline:
         """Print a summary of all registration results"""
         successful = [r for r in registration_results if r['success']]
         failed = [r for r in registration_results if not r['success']]
+        used_provided_center = [r for r in successful if r.get('used_provided_center', False)]
         
         print(f"\n{'='*60}")
         print(f"REGISTRATION SUMMARY")
@@ -209,11 +228,13 @@ class pose_estimation_pipeline:
         print(f"Total Objects: {len(registration_results)}")
         print(f"Successful: {len(successful)}")
         print(f"Failed: {len(failed)}")
+        print(f"Used Provided 3D Center: {len(used_provided_center)}")
         
         if successful:
             print(f"\n✓ SUCCESSFUL REGISTRATIONS:")
             for result in successful:
-                print(f"  - Object {result['object_index']}: {result['label']}")
+                center_info = " (used provided center)" if result.get('used_provided_center', False) else " (registration-estimated)"
+                print(f"  - Object {result['object_index']}: {result['label']}{center_info}")
                 if result['transformation'] is not None:
                     print(f"    Transformation: {result['transformation']}")
                     print(f"    Score: {result['confidence_score']}")
@@ -282,6 +303,10 @@ class pose_estimation_pipeline:
         self.print_step_timing("ROI Extraction", step_start, step_end)
 
         print(f"Total objects detected and extracted: {len(extracted_clouds_list)}")
+        
+        # Print info about 3D centers
+        objects_with_centers = sum(1 for _, obj_info in extracted_clouds_list if obj_info.get('center_3d') is not None)
+        print(f"Objects with valid 3D centers: {objects_with_centers}/{len(extracted_clouds_list)}")
 
         ## Step 4: Parallel Registration of ALL objects
         step_start = self.print_step_timing("Parallel Point Cloud Registration")
@@ -316,7 +341,8 @@ class pose_estimation_pipeline:
                     'label': result['label'],
                     'transformation': result['transformation'].tolist() if hasattr(result['transformation'], 'tolist') else result['transformation'],
                     'confidence_score': result['confidence_score'],
-                    'output_file': result['output_file']
+                    'output_file': result['output_file'],
+                    'used_provided_center': result.get('used_provided_center', False)
                 })
 
         with open(transformations_file, 'w') as f:

@@ -16,7 +16,7 @@ save_rois: false
 
 register_reference_models_path: "/home/rama/bpc_ws/bpc/ipd/models"
 register_output_path: "/home/rama/bpc_ws/bpc/pointcloud_registration/registration_results"
-registration_visualization_and_save: false
+registration_visualization_and_save: true
 
 # Parallel processing settings
 parallel_processing:
