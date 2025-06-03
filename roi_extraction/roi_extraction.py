@@ -24,6 +24,7 @@ def load_polygons_from_json_data(json_data):
     for mask_index, mask in enumerate(masks):
         label = mask.get('label')
         points = mask.get('points', [])
+        geometric_center = mask.get('geometric_center', [0, 0])  # Get geometric center
         
         # Convert to a list of (x, y) tuples
         polygon_coords = [(point[0], point[1]) for point in points]
@@ -32,27 +33,27 @@ def load_polygons_from_json_data(json_data):
         if label not in polygons_by_label:
             polygons_by_label[label] = []
         
-        # Store the polygon with its index
-        polygons_by_label[label].append((mask_index, polygon_coords))
+        # Store the polygon with its index and geometric center
+        polygons_by_label[label].append((mask_index, polygon_coords, geometric_center))
     
     return polygons_by_label, width, height
 
 def create_combined_mask(polygons_by_label, width, height):
     """
     Create a combined mask for all polygons using vectorized operations.
-    Returns a dictionary mapping (label, mask_index) to pixel indices.
+    Returns a dictionary mapping (label, mask_index) to pixel indices and geometric centers.
     """
     # Create coordinate grids
     x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
     pixel_coords = np.column_stack([x_coords.ravel(), y_coords.ravel()])
     
-    # Dictionary to store indices for each polygon
-    polygon_indices = {}
+    # Dictionary to store indices and centers for each polygon
+    polygon_data = {}
     
     print(f"Processing {sum(len(polys) for polys in polygons_by_label.values())} polygons...")
     
     for label, polygons in polygons_by_label.items():
-        for mask_index, polygon_coords in polygons:
+        for mask_index, polygon_coords, geometric_center in polygons:
             if len(polygon_coords) < 3:  # Skip invalid polygons
                 continue
                 
@@ -87,12 +88,47 @@ def create_combined_mask(polygons_by_label, width, height):
                 bbox_indices = np.where(bbox_mask)[0]
                 inside_indices = bbox_indices[inside_mask]
                 
-                # Convert 2D indices to 1D point cloud indices
-                polygon_indices[(label, mask_index)] = inside_indices
+                # Store polygon data with geometric center
+                polygon_data[(label, mask_index)] = {
+                    'indices': inside_indices,
+                    'geometric_center': geometric_center
+                }
                 
-                print(f"  {label} polygon {mask_index}: {len(inside_indices)} pixels")
+                print(f"  {label} polygon {mask_index}: {len(inside_indices)} pixels, center at {geometric_center}")
     
-    return polygon_indices
+    return polygon_data
+
+def pixel_to_point_cloud_index(pixel_x, pixel_y, width):
+    """
+    Convert 2D pixel coordinates to 1D point cloud index.
+    Assumes row-major ordering: index = y * width + x
+    """
+    return int(pixel_y * width + pixel_x)
+
+def get_3d_center_location(points, pixel_x, pixel_y, width, height):
+    """
+    Get the 3D location corresponding to a 2D pixel coordinate.
+    Returns None if the point is invalid (NaN or out of bounds).
+    """
+    # Check bounds
+    if pixel_x < 0 or pixel_x >= width or pixel_y < 0 or pixel_y >= height:
+        return None
+    
+    # Convert to point cloud index
+    pc_index = pixel_to_point_cloud_index(pixel_x, pixel_y, width)
+    
+    # Check if index is valid
+    if pc_index >= len(points):
+        return None
+    
+    # Get the 3D point
+    point_3d = points[pc_index]
+    
+    # Check if point is valid (not NaN or infinite)
+    if np.any(np.isnan(point_3d)) or np.any(np.isinf(point_3d)):
+        return None
+    
+    return point_3d
 
 def filter_valid_points(points, indices):
     """
@@ -117,7 +153,7 @@ def extract_labeled_point_clouds(point_cloud, json_data, output_dir=None, save_r
     Returns:
         list: Always returns list of tuples with extracted point clouds and their object IDs
               Format: [(point_cloud_object, object_id_dict), ...]
-              where object_id_dict = {'label': str, 'mask_index': int, 'point_count': int}
+              where object_id_dict = {'label': str, 'mask_index': int, 'point_count': int, 'center_3d': [x, y, z] or None}
     """
     # Validate arguments
     if save_rois and output_dir is None:
@@ -149,20 +185,19 @@ def extract_labeled_point_clouds(point_cloud, json_data, output_dir=None, save_r
     
     # Create combined mask for all polygons (OPTIMIZED PART)
     print("Creating combined mask for all polygons...")
-    polygon_indices = create_combined_mask(polygons_by_label, width, height)
+    polygon_data = create_combined_mask(polygons_by_label, width, height)
     
     # Group by label for processing
     labels_to_process = defaultdict(list)
-    for (label, mask_index), indices in polygon_indices.items():
-        labels_to_process[label].append((mask_index, indices))
+    for (label, mask_index), data in polygon_data.items():
+        labels_to_process[label].append((mask_index, data['indices'], data['geometric_center']))
     
     # List to store extracted point clouds with their IDs (ALWAYS created now)
     extracted_clouds_list = []
 
-    
     # Process and save/return point clouds
     print("Extracting point clouds...")
-    for label, polygon_data in labels_to_process.items():
+    for label, polygon_data_list in labels_to_process.items():
         print(f"Processing label: {label}...")
         
         # Create a subdirectory for this label if saving
@@ -171,9 +206,20 @@ def extract_labeled_point_clouds(point_cloud, json_data, output_dir=None, save_r
             os.makedirs(label_dir, exist_ok=True)
         
         # Process each polygon for this label
-        for mask_index, indices in polygon_data:
+        for mask_index, indices, geometric_center in polygon_data_list:
             # Filter out invalid points
             valid_indices = filter_valid_points(points, indices)
+            
+            # Get 3D center location from geometric center pixel
+            center_3d = None
+            if geometric_center and len(geometric_center) >= 2:
+                pixel_x, pixel_y = geometric_center[0], geometric_center[1]
+                center_3d = get_3d_center_location(points, pixel_x, pixel_y, width, height)
+                if center_3d is not None:
+                    center_3d = center_3d.tolist()  # Convert to list for JSON serialization
+                    print(f"  Polygon {mask_index}: Center 2D: ({pixel_x}, {pixel_y}) -> 3D: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
+                else:
+                    print(f"  Polygon {mask_index}: Center 2D: ({pixel_x}, {pixel_y}) -> 3D: Invalid point")
             
             print(f"  Polygon {mask_index}: Found {len(valid_indices)} valid points (from {len(indices)} total)")
             
@@ -199,7 +245,9 @@ def extract_labeled_point_clouds(point_cloud, json_data, output_dir=None, save_r
                 object_id = {
                     'label': label,
                     'mask_index': mask_index,
-                    'point_count': len(valid_indices)
+                    'point_count': len(valid_indices),
+                    'center_3d': center_3d,  # Added 3D center location
+                    'center_2d': geometric_center  # Also keep the original 2D center for reference
                 }
                 extracted_clouds_list.append((extracted_cloud, object_id))
                 
@@ -259,7 +307,12 @@ def main():
         label = object_id['label']
         mask_index = object_id['mask_index']
         point_count = object_id['point_count']
+        center_3d = object_id['center_3d']
+        center_2d = object_id['center_2d']
+        
+        center_str = f"3D: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})" if center_3d else "3D: Invalid"
         print(f"  ROI {i+1}: {label} (mask {mask_index}) - {point_count} points")
+        print(f"    Center 2D: ({center_2d[0]}, {center_2d[1]}), {center_str}")
 
 if __name__ == "__main__":
     main()

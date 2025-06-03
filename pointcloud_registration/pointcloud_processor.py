@@ -230,13 +230,10 @@ class PointCloudProcessor:
         R = transform[:3, :3]
         t = transform[:3, 3]
         
-        # Convert translation to mm (assuming input is in meters)
-        t_mm = t * 1000
-        
         # Format as space-separated strings
         R_flat = R.flatten()
         R_str = ' '.join([f'{val:.6f}' for val in R_flat])
-        t_str = ' '.join([f'{val:.6f}' for val in t_mm])
+        t_str = ' '.join([f'{val:.6f}' for val in t])
         
         return R_str, t_str
     
@@ -480,15 +477,32 @@ class PointCloudProcessor:
         print(f"Combined 3-part visualization saved to {vis_filename}")
         return vis_filename
     
-    def register_point_clouds(self, source, target):
-        """Perform registration between source and target point clouds"""
+    def register_point_clouds(self, source, target, center_3d=None):
+        """
+        Perform registration between source and target point clouds
+        
+        Args:
+            source: Source point cloud
+            target: Target point cloud  
+            center_3d: Optional 3D center position [x, y, z] to use as translation
+                      If provided, only rotation will be computed from registration
+        
+        Returns:
+            transform: 4x4 transformation matrix
+            source_center: Original source center
+            target_center: Original target center
+            confidence_score: Registration confidence score
+        """
         print("Starting registration process...")
+        
+        if center_3d is not None:
+            print(f"Using provided 3D center as translation: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
         
         # Preprocess point clouds
         source_processed, source_feat, source_scale, source_center = self.preprocess_for_registration(source, "source")
         target_processed, target_feat, target_scale, target_center = self.preprocess_for_registration(target, "target")
         
-        # Global registration (RANSAC)
+        # Global registration (RANSAC) - compute rotation
         print("RANSAC Global Registration...")
         start = time.time()
         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
@@ -556,13 +570,33 @@ class PointCloudProcessor:
         scale_matrix[0, 0] = scale_matrix[1, 1] = scale_matrix[2, 2] = source_scale / target_scale
         final_transform = np.matmul(final_transform_processed, scale_matrix)
         
+        # Override translation if center_3d is provided
+        if center_3d is not None:
+            print("Overriding translation with provided 3D center...")
+            
+            # Extract rotation from computed transformation
+            computed_rotation = final_transform[:3, :3]
+            
+            # Use center_3d directly as the translation
+            target_translation = np.array(center_3d)
+            
+            # Create new transformation with computed rotation and provided translation
+            final_transform = np.eye(4)
+            final_transform[:3, :3] = computed_rotation
+            final_transform[:3, 3] = target_translation
+            
+            print(f"Using rotation from registration and translation to center_3d")
+            print(f"Computed rotation matrix:")
+            print(computed_rotation)
+            print(f"Target translation: ({target_translation[0]:.3f}, {target_translation[1]:.3f}, {target_translation[2]:.3f})")
+
         # Compute confidence score
         confidence_score, confidence_details = self.compute_registration_confidence(
             source_processed, target_processed, final_transform_processed)
-        
+
         # Save confidence report
         self.save_confidence_report(confidence_score, confidence_details)
-        
+
         return final_transform, source_center, target_center, confidence_score
     
     def place_reference_in_scene(self, reference, scene, transform_src_to_ref, source_center, reference_center):
@@ -704,7 +738,7 @@ class PointCloudProcessor:
         print(f"Registration metrics plot saved to {metrics_file}")
     
     def run_registration_only(self, source_file=None, reference_file=None, 
-                              source_pcl=None, reference_pcl=None):
+                              source_pcl=None, reference_pcl=None, center_3d=None):
         """
         Run registration without placement
         
@@ -713,6 +747,7 @@ class PointCloudProcessor:
             reference_file: Path to reference point cloud/mesh file (optional if reference_pcl provided)
             source_pcl: Source point cloud object (optional if source_file provided)
             reference_pcl: Reference point cloud object (optional if reference_file provided)
+            center_3d: Optional 3D center position [x, y, z] to use as translation
             
         Returns:
             R_str, t_str: Transformation in R,t format
@@ -743,8 +778,9 @@ class PointCloudProcessor:
             source, reference, reference_for_reg, _, source_center, reference_center = self.load_point_clouds(
                 source_file, reference_file)
         
-        # Register (now returns confidence score too)
-        transform, source_center, reference_center, confidence_score = self.register_point_clouds(source, reference_for_reg)
+        # Register (now with optional center_3d and returns confidence score too)
+        transform, source_center, reference_center, confidence_score = self.register_point_clouds(
+            source, reference_for_reg, center_3d=center_3d)
         
         # Create transformed reference for visualization
         reference_transformed = copy.deepcopy(reference)
@@ -828,7 +864,7 @@ class PointCloudProcessor:
         return combined
     
     def run_full_pipeline(self, source_pcl, reference_file_path, scene_pcl, 
-                     output_file=None, visualize_and_save_results=True):
+                     output_file=None, visualize_and_save_results=True, center_3d=None):
         """
         Run both registration and placement
         
@@ -838,6 +874,7 @@ class PointCloudProcessor:
             scene_pcl: Scene point cloud object
             output_file: Path for combined output file (optional)
             visualize_and_save_results: If True, save visualizations and files; if False, skip unnecessary saves
+            center_3d: Optional 3D center position [x, y, z] to use as translation
             
         Returns:
             R_str, t_str: The computed transformation in R,t format
@@ -847,6 +884,9 @@ class PointCloudProcessor:
         # Use provided point cloud objects and load reference from file
         #print("Using provided source and scene point cloud objects...")
         #print(f"Loading reference model: {reference_file_path}")
+        
+        if center_3d is not None:
+            print(f"Will use provided 3D center as translation: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
         
         # Load reference from file
         if reference_file_path.endswith('.ply'):
@@ -885,8 +925,9 @@ class PointCloudProcessor:
         #print(f"Reference has {len(reference_for_reg.points)} points with center at {reference_center}")
         #print(f"Scene point cloud has {len(scene.points)} points")
         
-        # Register (now returns confidence score too)
-        transform, source_center, reference_center, confidence_score = self.register_point_clouds(source, reference_for_reg)
+        # Register (now with optional center_3d and returns confidence score too)
+        transform, source_center, reference_center, confidence_score = self.register_point_clouds(
+            source, reference_for_reg, center_3d=center_3d)
         
         if visualize_and_save_results:
             # Create transformed reference for visualization
@@ -943,6 +984,9 @@ class PointCloudProcessor:
         print(f"t: {t_str}")
         print(f"Registration confidence: {confidence_score:.3f}")
         
+        if center_3d is not None:
+            print("Used provided 3D center as translation")
+        
         # Always return the transformation in R,t format plus confidence score
         return R_str, t_str, confidence_score
 
@@ -960,6 +1004,7 @@ def main():
     parser.add_argument('--output_dir', type=str, default='registration_results', help='Directory for output files')
     parser.add_argument('--max_size', type=float, default=10, help='Maximum file size in MB')
     parser.add_argument('--no_save', action='store_true', help='Skip saving visualizations and intermediate files')
+    parser.add_argument('--center_3d', type=float, nargs=3, help='3D center position [x y z] to use as translation', metavar=('X', 'Y', 'Z'))
     
     args = parser.parse_args()
     
@@ -982,7 +1027,7 @@ def main():
             
             R_str, t_str, confidence_score = processor.run_full_pipeline(
                 source_pcl, args.reference, scene_pcl, args.output, 
-                visualize_and_save_results=not args.no_save)
+                visualize_and_save_results=not args.no_save, center_3d=args.center_3d)
             
             print(f"\nFinal transformation in R,t format:")
             print(f"R: {R_str}")
@@ -990,7 +1035,8 @@ def main():
             print(f"Registration confidence: {confidence_score:.3f}")
         else:
             # Registration only
-            R_str, t_str, source_center, reference_center, confidence_score = processor.run_registration_only(args.source, args.reference)
+            R_str, t_str, source_center, reference_center, confidence_score = processor.run_registration_only(
+                args.source, args.reference, center_3d=args.center_3d)
             print(f"Registration confidence: {confidence_score:.3f}")
     except Exception as e:
         print(f"Error: {str(e)}")
