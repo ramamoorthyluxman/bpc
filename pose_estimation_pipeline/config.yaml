@@ -3,14 +3,14 @@ maskrcnn_model_path: "/home/rama/bpc_ws/bpc/maskRCNN/output/ipd_val/model_epoch_
 maskrcnn_output_path: "/home/rama/bpc_ws/bpc/maskRCNN/results"
 maskrcnn_confidence_threshold: 0.8
 maskrcnn_category_txt_path: "/home/rama/bpc_ws/bpc/maskRCNN/categories.txt"
-maskrcnn_visualization_and_save: false
+maskrcnn_visualization_and_save: true
 
 # Build 3D PCL
-save_pcl: false
+save_pcl: true
 
 # ROI Extraction
 roi_extraction_output_path: "/home/rama/bpc_ws/bpc/roi_extraction/output"
-save_rois: false
+save_rois: true
 
 ## Register
 
