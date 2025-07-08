@@ -34,6 +34,10 @@ initial_pose_estimation/results
 initial_pose_estimation/output
 reproject/output
 pose_estimation_pipeline/registration_results
-SuperGluePretrainedNetwork-master/dump_match_pairs
+SuperGluePretrainedNetwork/dump_match_pairs
 pointcloud_registration/output
-SuperGluePretrainedNetwork-master/assets
+SuperGluePretrainedNetwork/assets
+test_pipeline/metadata
+maskRCNN/results_copy
+pointcloud_registration/GMS-Feature-Matcher-master/data
+pointcloud_registration/output
