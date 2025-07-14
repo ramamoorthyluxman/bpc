@@ -12,8 +12,6 @@ import csv
 import ast
 
 
-
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pcl_builder')))
 from create_pointcloud_gpu_accelerated import build_pcl
 
@@ -23,7 +21,9 @@ from superglue import SuperGlueMatcher
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'maskRCNN')))
 from inference import infer
 
-from update_detection_json import add_3d_centers_to_json
+from update_detection_json import add_3d_centers_to_json, find_valid_neighbor_pixel
+from homogrpahy_to_pose import pose_from_homography_complete
+from pose_estimator import compute_rigid_transform
 
 class process_scene_data:
     
@@ -37,16 +37,16 @@ class process_scene_data:
             max_workers = min(mp.cpu_count(), len(scene_data), 8)  # Cap at 8 for GPU memory
         self.max_workers = max_workers
 
-        # self.mask_objects()
+        ref_csv_path = self.config["ref_csv_path"]
+        with open(ref_csv_path, 'r') as f:
+            self.ref_dataset = list(csv.DictReader(f))
 
         self.detections = []
         self.detections_cluster_distance_threshold = 50
         self.consolidated_detections = []
-        # self.consolidate_detections()
+        self.detections_homographies = [] 
 
         self.min_nb_of_matches = 10
-        # self.do_feature_matchings()
-
         
 
     def load_config(self, config_path):
@@ -150,27 +150,57 @@ class process_scene_data:
                 image_id = self.scene_data[row_num]["image_id"]
                 scene_id = self.scene_data[row_num]["scene_id"]
 
-                print("scene_id: ", scene_id)
-                print("image_id: ", image_id)
-                print("camera_id: ", camera_id)
-                print("mask ID: ", mask_idx )
-                print("object_id: ", object_id)
-                
-                num_matches, confidence, viz_image, ref_row = self.compare_masked_images(test_img = self.scene_data[row_num]["rgb_img"], 
+                num_matches, confidence, viz_image, h_mat, ref_row, matched_points0, matched_points1 = self.compare_masked_images(test_img = self.scene_data[row_num]["rgb_img"], 
                                                     test_polygon_mask = mask,
                                                     camera_id = camera_id, 
                                                     object_id = object_id)
                 
                 if num_matches is not None:
-                    save_match_img_path = os.path.join(self.meta_data_path, "matches_scene_" + str(scene_id)  + "_image_" + str(image_id) + "_cam_" + camera_id + "_obj_" + str(object_id) + "_mask_" + str(mask_idx) + ".png")
-                    cv2.imwrite(save_match_img_path, viz_image)
 
-                    break
+                    K = np.array([float(self.scene_data[row_num][f'cam_K_{i}']) for i in range(9)]).reshape(3, 3)
+                    # Extract depth scale
+                    depth_scale = float(self.scene_data[row_num]['scene_depth_scale'])
 
-                    
-                    
+                    depth_map0 = self.scene_data[row_num]['depth_image_path']
+            
+                    depth_map1 = ref_row['image_path'].replace('rgb', 'depth')
+            
+                    matched_points0_3d = []
+                    matched_points1_3d = []
 
+                    for i in range(0, len(matched_points0)): 
+                        
+                        matched_point0_3d, used_pixel = find_valid_neighbor_pixel(
+                            int(matched_points0[i][0]), int(matched_points0[i][1]), depth_map0, K, depth_scale, 15
+                        )
+                        matched_point1_3d, used_pixel = find_valid_neighbor_pixel(
+                            int(matched_points1[i][0]), int(matched_points1[i][1]), depth_map1, K, depth_scale, 15
+                        )
+                        
+                        if matched_point0_3d is not None and matched_point1_3d is not None:
+                            matched_points0_3d.append(matched_point0_3d)
+                            matched_points1_3d.append(matched_point1_3d)    
 
+                    print("camera ID: ", camera_id)
+                    print("K: ", K)
+
+                    if len(matched_points0_3d)>3 and len(matched_points0_3d) == len(matched_points1_3d):
+
+                        save_match_img_path = os.path.join(self.meta_data_path, "matches_scene_" + str(scene_id)  + "_image_" + str(image_id) + "_cam_" + camera_id + "_obj_" + str(object_id) + "_mask_" + str(mask_idx) + ".png")
+                        cv2.imwrite(save_match_img_path, viz_image)
+                        result = {'scene_cam_row_num': row_num,
+                                'mask_idx': mask_idx,
+                                'object_idx': object_id,
+                                'ref_row': ref_row,
+                                'h_mat': h_mat,
+                                'confidence': confidence,
+                                'num_matches': num_matches,
+                                'matched_points0': matched_points0,
+                                'matched_points1': matched_points1,
+                                'matched_points0_3d' : matched_points0_3d,
+                                'matched_points1_3d' : matched_points1_3d}
+                        self.detections_homographies.append(result)
+                        break
 
     def compare_masked_images(self, test_img, test_polygon_mask, camera_id, object_id):
         
@@ -178,44 +208,51 @@ class process_scene_data:
         test_mask = np.zeros(test_img.shape[:2], dtype=np.uint8)
         cv2.fillPoly(test_mask, [np.array(test_polygon_mask, dtype=np.int32)], 255)
         masked_test = cv2.bitwise_and(test_img, test_img, mask=test_mask)
-
-
-        csv_path = self.config["ref_csv_path"]
         
-        # Read CSV and process matching rows
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Check if camera_type and object_id match
-                if row['camera_type'] == camera_id and int(row['object_id']) == object_id:
-                    # Load reference image
-                    ref_img = cv2.imread(row['image_path'])
-                    
-                    # Parse and apply reference polygon mask
-                    ref_polygon = ast.literal_eval(row['polygon_mask'])
-                    ref_mask = np.zeros(ref_img.shape[:2], dtype=np.uint8)
-                    cv2.fillPoly(ref_mask, [np.array(ref_polygon, dtype=np.int32)], 255)
-                    masked_ref = cv2.bitwise_and(ref_img, ref_img, mask=ref_mask)
-                    
-                    # Compare using superglue
-                    # Initialize the matcher
-                    matcher = SuperGlueMatcher()
-                    # Use it
-                    
-                    cv2.imwrite('/home/rama/bpc_ws/bpc/test_pipeline/tmp/ref.png', masked_ref)
-                    cv2.imwrite('/home/rama/bpc_ws/bpc/test_pipeline/tmp/test.png', masked_test)
+        for row in self.ref_dataset:
+            # Check if camera_type and object_id match
+            if row['camera_type'] == camera_id and int(row['object_id']) == object_id:
+                # Load reference image
+                ref_img = cv2.imread(row['image_path'])
+                
+                # Parse and apply reference polygon mask
+                ref_polygon = ast.literal_eval(row['polygon_mask'])
+                ref_mask = np.zeros(ref_img.shape[:2], dtype=np.uint8)
+                cv2.fillPoly(ref_mask, [np.array(ref_polygon, dtype=np.int32)], 255)
+                masked_ref = cv2.bitwise_and(ref_img, ref_img, mask=ref_mask)
+                
+                # Compare using superglue
+                # Initialize the matcher
+                matcher = SuperGlueMatcher()
+                # Use it
+                
+                num_matches, confidence, viz_image, h_mat, matched_points0, matched_points1 = matcher.superglue(masked_test, masked_ref)
 
-                    num_matches, confidence, viz_image = matcher.superglue(masked_test, masked_ref)
-                   
+                if num_matches is not None:
 
-                    if num_matches is not None:
-                        print("Number of matches: ", num_matches)
-                        print(f"Average confidence: ", confidence)
-                        return num_matches, confidence, viz_image, row
+                    
+                        
+                    print("Number of matches: ", num_matches)
+                    print(f"Average confidence: ", confidence)
+
+                    return num_matches, confidence, viz_image, h_mat, row, matched_points0, matched_points1
 
                     
         
-        return None, None, None, None
+        return None, None, None, None, None, None, None
+    
+    def compute_6d_poses(self):
+        if self.detections_homographies is None:
+            return 
+        
+        for result in self.detections_homographies:
+            
+            matched_points0_3d = result['matched_points0_3d']
+            matched_points1_3d = result['matched_points1_3d']
+
+            R, T, rmse = compute_rigid_transform(matched_points0_3d, matched_points1_3d)
+
+            print('Rigid transformation, error:', R, T, rmse)
                 
 
         
