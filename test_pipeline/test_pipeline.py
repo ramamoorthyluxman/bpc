@@ -44,7 +44,8 @@ class SceneImageGroupProcessor:
                 scene_info.mask_objects()
                 scene_info.consolidate_detections()
 
-                compare_result = scene_info.do_feature_matchings()
+                scene_info.do_feature_matchings()
+                scene_info.compute_6d_poses()
 
                 
 

@@ -7,7 +7,6 @@ import matplotlib.cm as cm
 from models.matching import Matching
 from models.utils import make_matching_plot
 from models.utils import process_resize
-from models.utils import compute_homography_ransac
 
 class SuperGlueMatcher:
     def __init__(self):
@@ -75,36 +74,31 @@ class SuperGlueMatcher:
 
         
         
-        mkpts0_org = mkpts0 * np.array([scales[0], scales[1]])
-        mkpts1_org = mkpts1 * np.array([scales[0], scales[1]])
-        mkpts1_org[:, 0] += img0.shape[1]  # Offset for second image
+        mkpts0_display = mkpts0 * np.array([scales[0], scales[1]])
+        mkpts1_display = mkpts1 * np.array([scales[0], scales[1]])
+        mkpts1_display[:, 0] += img0.shape[1]  # Offset for second image
 
         
 
-        print(mkpts0_org.shape, mkpts1_org.shape)
-        print(type(mkpts0_org), type(mkpts1_org))
-
         num_matches = None
         viz_image = None
+        h_mat = None
 
         img0 = (img0 * 255).astype(np.uint8)
         img1 = (img1 * 255).astype(np.uint8)
 
-        print(mkpts1_org.shape)
 
-        if mkpts1_org.shape[0] > 3:
+        if mkpts0.shape[0] > 3 and mkpts1.shape[0] > 3:
             
-            # h_mat = compute_homography_ransac(mkpts0_org.astype(int), mkpts1_org.astype(int))
             # Convert to float32
-            src_pts = np.float32(mkpts0_org).reshape(-1, 1, 2)
-            dst_pts = np.float32(mkpts1_org).reshape(-1, 1, 2)
+            src_pts = np.float32(mkpts0).reshape(-1, 1, 2)
+            dst_pts = np.float32(mkpts1).reshape(-1, 1, 2)
             
             # Compute homography with RANSAC (robust to outliers)
             h_mat, mask = cv2.findHomography(src_pts, dst_pts, 
                                         cv2.RANSAC, 
                                         ransacReprojThreshold=3.0)
 
-            print(h_mat)
             
             if h_mat is not None:
                 
@@ -114,17 +108,19 @@ class SuperGlueMatcher:
                 area_trans = np.count_nonzero(warped)
 
                 if area_trans / area_orig > 4 or area_trans / area_orig < 0.6:
-                    print(f"Extreme content change: {area_trans / area_orig}")
-                    return None, None, None
+                    # print(f"Extreme content change: {area_trans / area_orig}")
+                    return None, None, None, None, None, None
                 
                 num_matches = len(mkpts0)
                 viz_image = np.hstack((img0, img1))
 
-                for pt0, pt1 in zip(mkpts0_org.astype(int), mkpts1_org.astype(int)):
+                for pt0, pt1 in zip(mkpts0_display.astype(int), mkpts1_display.astype(int)):
                     cv2.circle(viz_image, tuple(pt0), 2, (0,255,0), -1)
                     cv2.circle(viz_image, tuple(pt1), 2, (0,0,255), -1)
                     cv2.line(viz_image, tuple(pt0), tuple(pt1), (255,255,0), 2)
                 
                 viz_image = np.hstack((viz_image, warped))
+
+                return num_matches, mconf, viz_image, h_mat, mkpts0.astype(int), mkpts1.astype(int)
             
-        return num_matches, mconf, viz_image
+        return None, None, None, None, None, None
