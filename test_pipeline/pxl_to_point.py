@@ -128,6 +128,29 @@ def pixels_to_3d_points(pixel_indices: List[Tuple[int, int]],
         return points_3d
 
 def pixel_to_3d_point(u: int, v: int, 
+                      depth_path: str, 
+                      k_matrix, 
+                      depth_scale):
+    # Load depth image
+    depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+    
+    # Get depth value at pixel
+    depth = depth_image[v, u].astype(np.float32) * depth_scale
+    
+    # Extract camera parameters
+    fx = float(k_matrix[0, 0])
+    fy = float(k_matrix[1, 1])
+    cx = float(k_matrix[0, 2])
+    cy = float(k_matrix[1, 2])
+    
+    # Convert to 3D coordinates
+    x = (u - cx) * depth / fx
+    y = (v - cy) * depth / fy
+    z = depth
+    
+    return [x, y, z]
+
+def pixel_to_3d_point_old(u: int, v: int, 
                      depth_path: str, 
                      k_matrix, 
                      depth_scale,

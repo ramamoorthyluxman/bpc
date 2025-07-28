@@ -3,11 +3,17 @@ import os
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from process_scene_data import process_scene_data
+import sys
+import time
+import gc
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'utilities')))
+from generate_output_csv import CSVWriter
 
 class SceneImageGroupProcessor:
     def __init__(self, csv_file_path):
         self.csv_file_path = csv_file_path
+        self.csv_writer = CSVWriter('results.csv')
     
     def iterate_by_scene_image_groups(self):
         """
@@ -36,6 +42,7 @@ class SceneImageGroupProcessor:
             print("=" * 60)
             
             for group_num, ((scene_id, image_id), camera_rows) in enumerate(grouped_data.items(), start=1):
+                start_time = time.time()
                 print(f"\nGroup {group_num}: Scene {scene_id}, Image {image_id}")
                 print(f"Number of cameras: {len(camera_rows)}")
                 print("-" * 40)
@@ -46,6 +53,22 @@ class SceneImageGroupProcessor:
 
                 scene_info.do_feature_matchings()
                 scene_info.compute_6d_poses()
+
+                end_time = time.time()
+
+                for result in scene_info.detections_homographies:
+                    scene_id = scene_id
+                    im_id = image_id
+                    obj_id = result['object_idx']
+                    score = result['confidence']
+                    R = result['R']
+                    t = result['T']
+                    time_taken = end_time-start_time
+                    # Add row to CSV and save
+                    self.csv_writer.add_row(scene_id, im_id, obj_id, score, R, t, time_taken)
+
+                del scene_info
+                gc.collect()
 
                 
 
