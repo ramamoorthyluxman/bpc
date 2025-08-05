@@ -439,10 +439,10 @@ if __name__ == "__main__":
     
     # Choose processing method based on your data size and requirements:
     
-    print("Choose processing method:")
-    print("1. Original with optimizations (small to medium datasets)")
-    print("2. Streaming with sorting (large datasets, ensures correct grouping)")
-    print("3. Chunk-based processing (alternative for large datasets)")
+    # print("Choose processing method:")
+    # print("1. Original with optimizations (small to medium datasets)")
+    # print("2. Streaming with sorting (large datasets, ensures correct grouping)")
+    # print("3. Chunk-based processing (alternative for large datasets)")
     
     # Recommended approach for correct grouping with memory efficiency:
     print("\nUsing streaming approach with sorting for correct grouping...")

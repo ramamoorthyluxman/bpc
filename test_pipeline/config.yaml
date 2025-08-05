@@ -10,7 +10,7 @@ meta_data_folder: /home/rama/bpc_ws/bpc/test_pipeline/metadata
 
 
 # MaskRCNN
-maskrcnn_model_path: "/home/rama/bpc_ws/bpc/maskRCNN/output/ipd_val/model_epoch_235.pth"
+maskrcnn_model_path: "/home/rama/bpc_ws/bpc/maskRCNN/output/ipd_val/new_weights/model_epoch_999.pth"
 maskrcnn_output_path: "/home/rama/bpc_ws/bpc/maskRCNN/results"
 maskrcnn_confidence_threshold: 0.8
 maskrcnn_category_txt_path: "/home/rama/bpc_ws/bpc/maskRCNN/categories.txt"
