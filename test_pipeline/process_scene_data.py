@@ -12,8 +12,6 @@ import csv
 import ast
 
 
-
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pcl_builder')))
 from create_pointcloud_gpu_accelerated import build_pcl
 
@@ -39,7 +37,9 @@ class process_scene_data:
             max_workers = min(mp.cpu_count(), len(scene_data), 8)  # Cap at 8 for GPU memory
         self.max_workers = max_workers
 
-        # self.mask_objects()
+        ref_csv_path = self.config["ref_csv_path"]
+        with open(ref_csv_path, 'r') as f:
+            self.ref_dataset = list(csv.DictReader(f))
 
         self.detections = []
         self.detections_cluster_distance_threshold = 50
@@ -235,32 +235,27 @@ class process_scene_data:
         test_mask = np.zeros(test_img.shape[:2], dtype=np.uint8)
         cv2.fillPoly(test_mask, [np.array(test_polygon_mask, dtype=np.int32)], 255)
         masked_test = cv2.bitwise_and(test_img, test_img, mask=test_mask)
-
-
-        csv_path = self.config["ref_csv_path"]
         
-        # Read CSV and process matching rows
-        with open(csv_path, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Check if camera_type and object_id match
-                if row['camera_type'] == camera_id and int(row['object_id']) == object_id:
-                    # Load reference image
-                    ref_img = cv2.imread(row['image_path'])
-                    
-                    # Parse and apply reference polygon mask
-                    ref_polygon = ast.literal_eval(row['polygon_mask'])
-                    ref_mask = np.zeros(ref_img.shape[:2], dtype=np.uint8)
-                    cv2.fillPoly(ref_mask, [np.array(ref_polygon, dtype=np.int32)], 255)
-                    masked_ref = cv2.bitwise_and(ref_img, ref_img, mask=ref_mask)
-                    
-                    # Compare using superglue
-                    # Initialize the matcher
-                    matcher = SuperGlueMatcher()
-                    # Use it
-                    
-                    cv2.imwrite('/home/rama/bpc_ws/bpc/test_pipeline/tmp/ref.png', masked_ref)
-                    cv2.imwrite('/home/rama/bpc_ws/bpc/test_pipeline/tmp/test.png', masked_test)
+        for row in self.ref_dataset:
+            # Check if camera_type and object_id match
+            if row['camera_type'] == camera_id and int(row['object_id']) == object_id:
+                # Load reference image
+                ref_img = cv2.imread(row['image_path'])
+                
+                # Parse and apply reference polygon mask
+                ref_polygon = ast.literal_eval(row['polygon_mask'])
+                ref_mask = np.zeros(ref_img.shape[:2], dtype=np.uint8)
+                cv2.fillPoly(ref_mask, [np.array(ref_polygon, dtype=np.int32)], 255)
+                masked_ref = cv2.bitwise_and(ref_img, ref_img, mask=ref_mask)
+                
+                # Compare using superglue
+                # Initialize the matcher
+                matcher = SuperGlueMatcher()
+                # Use it
+                
+                num_matches, confidence, viz_image, h_mat, matched_points0, matched_points1 = matcher.superglue(masked_test, masked_ref)
+
+                if num_matches is not None:
 
                     num_matches, confidence, viz_image, h_mat, matched_points0, matched_points1 = matcher.superglue(masked_test, masked_ref)
                    

@@ -7,7 +7,6 @@ import matplotlib.cm as cm
 from models.matching import Matching
 from models.utils import make_matching_plot
 from models.utils import process_resize
-from models.utils import compute_homography_ransac
 
 class SuperGlueMatcher:
     def __init__(self):
@@ -85,11 +84,11 @@ class SuperGlueMatcher:
 
         num_matches = None
         viz_image = None
+        h_mat = None
 
 
-        if mkpts1_org.shape[0] > 3:
+        if mkpts0.shape[0] > 3 and mkpts1.shape[0] > 3:
             
-            # h_mat = compute_homography_ransac(mkpts0_org.astype(int), mkpts1_org.astype(int))
             # Convert to float32
             src_pts = np.float32(mkpts0_org).reshape(-1, 1, 2)
             dst_pts = np.float32(mkpts1_org_w_offset).reshape(-1, 1, 2)
