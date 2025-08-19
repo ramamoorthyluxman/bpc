@@ -43,6 +43,9 @@ class TestResultsTab:
         self.detection_camera_ids = []
         self.current_detection_index = 0
         self.current_image_with_detections = None
+
+        # Store coordinate frames for visualization - SIMPLE LIST
+        self.detected_poses_transformation_matrix = []  # Store coordinate frames for detection results
         
         # Initialize image zoom tracking
         self.image_zooms = {}  # Track zoom level for each image
@@ -672,8 +675,33 @@ class TestResultsTab:
             import traceback
             traceback.print_exc()
 
+    
+    def create_coordinate_frame_from_pose(self, R_matrix, T_vector, size=0.05):
+        """Create a coordinate frame marker from rotation matrix and translation vector"""
+        try:
+            # Create coordinate frame at origin
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size)
+            
+            # Create transformation matrix (4x4 homogeneous)
+            transformation = np.eye(4)
+            transformation[:3, :3] = R_matrix  # Set rotation part
+            transformation[:3, 3] = T_vector   # Set translation part
+            
+            # Apply the full transformation at once
+            frame.transform(transformation)
+            
+            # Debug print
+            print(f"Applied transformation with T: {T_vector}")
+            
+            return frame
+        except Exception as e:
+            print(f"Error creating coordinate frame: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def run_detection_clicked(self):
-        """Handle Run Detection button click"""
+        """Handle Run Detection button click - Enhanced with point cloud and poses"""
         selected_items = self.test_csv_tree.selection()
 
         if not selected_items:
@@ -708,6 +736,17 @@ class TestResultsTab:
         selected_key = (selected_scene_id, selected_image_id)
         matching_rows = grouped_data[selected_key]
 
+        # Find photoneo camera data for point cloud creation
+        photoneo_row = None
+        for row in matching_rows:
+            if row['camera_type'] == 'photoneo':
+                photoneo_row = row
+                break
+        
+        if photoneo_row is None:
+            messagebox.showerror("Error", "No photoneo camera data found in selected scene. Cannot create world coordinate point cloud.")
+            return
+
         start_time = time.time()
         scene_info = process_scene_data(matching_rows)
         scene_info.mask_objects()
@@ -721,16 +760,237 @@ class TestResultsTab:
 
         # Display results
         self.display_detection_results(scene_info, time_taken)
+        
+        # Create point cloud with poses
+        self.create_detection_pointcloud_with_poses(photoneo_row, scene_info)
+
+
             
         del scene_info
         gc.collect()
 
+    
+
+    def create_detection_pointcloud_with_poses(self, photoneo_row, scene_info):
+        """Create point cloud from photoneo data and add pose markers"""
+        try:
+            # Extract photoneo camera data
+            image_path = photoneo_row['rgb_image_path']
+            depth_scale = photoneo_row['depth_scale']
+            image_index = photoneo_row['image_index']
+            
+            print(f"Creating detection point cloud from photoneo: {image_path}")
+            
+            # Find corresponding depth image path
+            rgb_dir = os.path.dirname(image_path)
+            dataset_dir = os.path.dirname(rgb_dir)
+            depth_dir = os.path.join(dataset_dir, "depth_photoneo")
+            
+            image_filename = os.path.basename(image_path)
+            depth_path = os.path.join(depth_dir, image_filename)
+            
+            print(f"Looking for photoneo depth at: {depth_path}")
+            
+            # Check if files exist
+            if not os.path.exists(image_path):
+                raise ValueError(f"Photoneo RGB image not found: {image_path}")
+            
+            if not os.path.exists(depth_path):
+                raise ValueError(f"Photoneo depth image not found: {depth_path}")
+            
+            # Load camera parameters
+            k_matrix = self.load_camera_parameters(dataset_dir, "photoneo", image_index)
+            if k_matrix is None:
+                raise ValueError("Could not load photoneo camera parameters")
+            
+            print(f"Photoneo K matrix:\n{k_matrix}")
+
+            # Check depth image properties first
+            depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+            if depth_image is None:
+                raise ValueError("Could not load depth image")
+            
+            print(f"Depth image shape: {depth_image.shape}")
+            print(f"Depth image dtype: {depth_image.dtype}")
+            print(f"Depth min/max: {depth_image.min()}/{depth_image.max()}")
+            
+            # Create base point cloud using existing function
+            point_cloud_original, colors_original = create_pointcloud_with_colors(
+                depth_path=depth_path,
+                rgb_path=image_path,
+                k_matrix=k_matrix,
+                depth_scale=depth_scale,
+                use_gpu=True,
+            )
+            
+            print(f"Original photoneo point cloud created with {len(point_cloud_original)} points")
+            
+            if len(point_cloud_original) > 0:
+                # Filter out invalid points
+                valid_mask = np.isfinite(point_cloud_original).all(axis=1)
+                valid_mask &= (point_cloud_original[:, 2] > 0)  # Positive Z values
+                
+                if np.sum(valid_mask) > 0:
+                    valid_points = point_cloud_original[valid_mask]
+                    valid_colors = colors_original[valid_mask]
+                    
+                    print(f"Filtered {len(valid_points)} valid points from {len(point_cloud_original)} total")
+
+
+                    # Create the mask
+                    mask = (np.abs(valid_points[:, 0]) < 4000) & (np.abs(valid_points[:, 1]) < 4000) & (np.abs(valid_points[:, 2]) < 4000)
+
+                    # Filter before creating the point cloud
+                    filtered_points = valid_points[mask]
+                    filtered_colors = valid_colors[mask]
+
+                    print(f"Outliers filtered {len(filtered_points)} valid points from {len(point_cloud_original)} total")
+                    
+                    # Create Open3D point cloud
+                    self.current_point_cloud = o3d.geometry.PointCloud()
+                    self.current_point_cloud.points = o3d.utility.Vector3dVector(filtered_points)
+                    self.current_point_cloud.colors = o3d.utility.Vector3dVector(filtered_colors / 255.0)
+                    
+                    results_summary = scene_info.display_results.get("results_summary", [])
+                    
+                    for i, result in enumerate(results_summary):
+                        try:
+                            R_test_world = result.get("R_test_world")
+                            T_test_world = result.get("T_test_world")
+                            object_id = result.get("object ID", "Unknown")
+                            camera_id = result.get("camera ID", "Unknown")
+                            # print("R_test_world: ", R_test_world)
+                            # print("T_test_world: ", T_test_world)
+                            if R_test_world is not None and T_test_world is not None:
+                                 # Convert to numpy arrays
+
+                                R_matrix = np.array(R_test_world, dtype=float)
+                                T_vector = np.array(T_test_world, dtype=float)
+
+
+                                print("R_matrix: ", R_matrix)
+                                print("T_vector: ", T_vector)
+                                
+                                
+                                # Create transformation matrix
+                                transformation_matrix = np.eye(4)
+                                transformation_matrix[:3, :3] = R_matrix
+                                transformation_matrix[:3, 3] = T_vector
+
+                                
+                                self.detected_poses_transformation_matrix.append(transformation_matrix)
+                                
+                        except Exception as e:
+                            print(f"Error creating pose marker for result {i}: {e}")
+                            continue
+                    
+                    # Update status
+                    num_poses = len(self.detected_poses_transformation_matrix) 
+                    self.pcl_status_label.config(
+                        text=f"Detection point cloud ready ({len(self.current_point_cloud.points)} points, {num_poses} object poses)\nClick 'Open 3D Viewer' to visualize",
+                        foreground="green"
+                    )
+                    
+                    print(f"Detection point cloud created with {len(self.current_point_cloud.points)} points and {num_poses} pose markers")
+                    
+                else:
+                    self.current_point_cloud = None
+                    self.pcl_status_label.config(
+                        text="No valid points after filtering",
+                        foreground="red"
+                    )
+            else:
+                self.current_point_cloud = None
+                self.pcl_status_label.config(
+                    text="No valid points found - check depth scale and image format",
+                    foreground="red"
+                )
+                
+        except Exception as e:
+            print(f"Error creating detection point cloud: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            self.pcl_status_label.config(
+                text="Error creating detection point cloud",
+                foreground="red"
+            )
+            self.current_point_cloud = None
+            messagebox.showerror("Error", f"Failed to create detection point cloud:\n{str(e)}")
+
+    def open_3d_viewer(self):
+        """Open Open3D visualization window - Enhanced for detection results with poses"""
+        if self.current_point_cloud is None:
+            messagebox.showwarning("No Data", "Please load image and point cloud data first")
+            return
+        
+        try:
+
+            
+            # Start with the point cloud
+            geometries = [self.current_point_cloud]
+
+            # add simple origin frame (for basic point cloud loading)
+            points = np.asarray(self.current_point_cloud.points)
+            pc_min = points.min(axis=0)
+            pc_max = points.max(axis=0)
+            pc_size = np.max(pc_max - pc_min)
+            print("Test pc_size: ", pc_size)
+            axis_size = pc_size * 0.05
+            
+            origin_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
+            origin_frame.translate([0, 0, 0])
+            geometries.append(origin_frame)
+            print("Added basic origin coordinate frame")
+            
+            # Add coordinate frames if they exist (from detection results)
+        
+            print("Adding detection coordinate frames to 3D viewer:")
+            for i, frame in enumerate(self.detected_poses_transformation_matrix):
+                coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
+                print("Test transformation matrix: ", frame)
+                coord_frame.transform(frame)
+                geometries.append(coord_frame)
+                center = np.asarray(coord_frame.get_center())
+                print(f"Frame {i} center: {center}")      
+                # Add red sphere marker at original pose location
+                pose_position = frame[:3, 3]
+                marker_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=axis_size*0.01)
+                marker_sphere.paint_uniform_color([1.0, 0.0, 0.0])  # Red marker
+                marker_sphere.translate(pose_position)
+                geometries.append(marker_sphere)          
+            print(f"Added {len(self.detected_poses_transformation_matrix)} coordinate frames")
+            
+            
+            print(f"Total geometries to display: {len(geometries)}")
+            
+            # Determine window title based on content
+            if hasattr(self, 'detected_poses_transformation_matrix') and self.detected_poses_transformation_matrix:
+                window_title = "Detection Results with Object Poses"
+            else:
+                window_title = "Point Cloud Viewer"
+            
+            # Use the draw_geometries function
+            print(f"Opening {window_title}...")
+            o3d.visualization.draw_geometries(
+                geometries,
+                window_name=window_title,
+                width=1200,
+                height=800,
+                point_show_normal=False
+            )
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open 3D viewer:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
     def clear_results_display(self):
-        """Clear all results display elements"""
+        """Clear all results display elements - Enhanced to clear detection coordinate frames"""
         self.time_taken_label.config(text="")
         self.maskrcnn_label.config(text="")
         self.objects_label.config(text="")
-        self.results_summary_label.config(text="")  # NEW - Clear results summary
+        self.results_summary_label.config(text="")
         
         # Clear detection data
         self.detection_images = []
@@ -738,6 +998,9 @@ class TestResultsTab:
         self.detection_camera_ids = []
         self.current_detection_index = 0
         self.current_image_with_detections = None
+        
+        # Clear detection coordinate frames
+        self.detection_coordinate_frames = []
         
         # Hide navigation buttons and camera label
         self.left_btn.pack_forget()
@@ -996,50 +1259,8 @@ class TestResultsTab:
         self.image_id = self.image_canvas.create_image(0, 0, anchor='nw', image=self.photo)
         self.image_canvas.configure(scrollregion=self.image_canvas.bbox("all"))
 
-    def open_3d_viewer(self):
-        """Open Open3D visualization window for test point cloud (no GT poses)"""
-        if self.current_point_cloud is None:
-            messagebox.showwarning("No Data", "Please load image and point cloud data first")
-            return
-        
-        try:
-            # Get point cloud bounds for reference
-            points = np.asarray(self.current_point_cloud.points)
-            pc_min = points.min(axis=0)
-            pc_max = points.max(axis=0)
-            pc_size = np.max(pc_max - pc_min)
-            
-            print(f"Test point cloud bounds: min={pc_min}, max={pc_max}")
-            print(f"Test point cloud size: {pc_size}")
-            
-            # Start with the point cloud
-            geometries = [self.current_point_cloud]
-            
-            # Add coordinate frame at origin for reference
-            axis_size = pc_size * 0.05
-            print(f"Using axis size: {axis_size}")
-            
-            origin_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
-            origin_frame.translate([0, 0, 0])  # Center at origin
-            geometries.append(origin_frame)
-            print(f"Added origin coordinate frame at: {[0, 0, 0]}")
-            
-            print(f"Total geometries to display: {len(geometries)}")
-            
-            # Use the draw_geometries function
-            print("Opening test data visualization...")
-            o3d.visualization.draw_geometries(
-                geometries,
-                window_name="Test Point Cloud Viewer",
-                width=1200,
-                height=800,
-                point_show_normal=False
-            )
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open 3D viewer:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
+    
+
 
     def create_and_display_pointcloud(self, depth_path, rgb_path, k_matrix, depth_scale):
         """Create and display 3D point cloud using Open3D"""

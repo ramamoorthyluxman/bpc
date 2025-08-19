@@ -734,6 +734,7 @@ class GroundTruthsTab:
             pc_max = points.max(axis=0)
             pc_center = (pc_min + pc_max) / 2
             pc_size = np.max(pc_max - pc_min)
+            print("GT pc_size: ", pc_size)
             
             print(f"Point cloud bounds: min={pc_min}, max={pc_max}")
             print(f"Point cloud center: {pc_center}")
@@ -776,7 +777,10 @@ class GroundTruthsTab:
                         
                         # Always create the original pose too (even if far away)
                         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
+                        print("GT transformation matrix: ", transformation_matrix)
                         coord_frame.transform(transformation_matrix)
+                        center = np.asarray(coord_frame.get_center())
+                        print(f"Frame {i} center: {center}") 
                         geometries.append(coord_frame)
                         
                         # Add red sphere marker at original pose location
@@ -948,7 +952,7 @@ class GroundTruthsTab:
                 rgb_path=rgb_path,
                 k_matrix=k_matrix,
                 depth_scale=depth_scale,
-                use_gpu=False,
+                use_gpu=True,
             )
             
             print(f"Original point cloud created with {len(point_cloud_original)} points")

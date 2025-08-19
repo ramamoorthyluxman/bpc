@@ -6,6 +6,8 @@ from process_scene_data import process_scene_data
 import sys
 import time
 import gc
+from collections import defaultdict
+
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'utilities')))
 from generate_output_csv import CSVWriter
