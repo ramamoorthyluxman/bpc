@@ -772,6 +772,7 @@ class TestResultsTab:
     
 
     def create_detection_pointcloud_with_poses(self, photoneo_row, scene_info):
+        self.detected_poses_transformation_matrix = []
         """Create point cloud from photoneo data and add pose markers"""
         try:
             # Extract photoneo camera data
