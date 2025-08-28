@@ -43,6 +43,7 @@ class process_scene_data:
         self.display_results["detected_objects"] = []
         self.display_results["nb_maskrcnn_detections"] = 0
         self.display_results["results_summary"] = []
+        self.display_results["feature_matching_images"] = []
         
         ref_csv_path = self.config["ref_csv_path"]
         with open(ref_csv_path, 'r') as f:
@@ -236,7 +237,11 @@ class process_scene_data:
                     if len(matched_points0_3d)>3 and len(matched_points0_3d) == len(matched_points1_3d):
 
                         save_match_img_path = os.path.join(self.meta_data_path, "matches_scene_" + str(scene_id)  + "_image_" + str(image_id) + "_cam_" + camera_id + "_obj_" + str(object_id) + "_mask_" + str(mask_idx) + ".png")
+                        
+                        os.makedirs(self.meta_data_path, exist_ok=True)
+                        cv2.putText(viz_image, f"Scene: {scene_id}, Image: {image_id}, Cam: {camera_id}, Obj: {object_id}, Mask: {mask_idx}", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 3.2, (255, 255, 255), 1)
                         cv2.imwrite(save_match_img_path, viz_image)
+
                         result = {'scene_cam_row_num': row_num,
                                 'mask_idx': mask_idx,
                                 'object_idx': object_id,
@@ -247,8 +252,10 @@ class process_scene_data:
                                 'matched_points0': matched_points0,
                                 'matched_points1': matched_points1,
                                 'matched_points0_3d' : matched_points0_3d,
-                                'matched_points1_3d' : matched_points1_3d}
+                                'matched_points1_3d' : matched_points1_3d,
+                                'viz_image': viz_image}
                         self.detections_homographies.append(result)
+                        self.display_results["feature_matching_images"].append(viz_image)
                         
                         
                         break

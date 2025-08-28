@@ -40,7 +40,9 @@ class TestResultsTab:
         self.detection_results = None
         self.detection_images = []
         self.detection_polygons = []
+        self.detection_polygons_object_correspondence = [] # index of the consolidated objects results the polygon corresponds to
         self.detection_camera_ids = []
+        self.detection_image_types = []  # Track whether each image is 'detection' or 'correspondence'
         self.current_detection_index = 0
         self.current_image_with_detections = None
 
@@ -563,7 +565,7 @@ class TestResultsTab:
             text="",
             font=("Arial", 9),
             anchor='w',
-            wraplength=350,
+            wraplength=700,
             justify='left'
         )
         self.results_summary_label.pack(anchor='w', pady=(10, 0))
@@ -581,23 +583,72 @@ class TestResultsTab:
             self.display_current_detection_image()
 
     def display_current_detection_image(self):
-        """Display the current detection image with polygons"""
-        if (self.current_detection_index < len(self.detection_images) and 
-            self.current_detection_index < len(self.detection_polygons) and
-            self.current_detection_index < len(self.detection_camera_ids)):
-            
+        """Display the current detection image with polygons or correspondence image"""
+        if self.current_detection_index < len(self.detection_images):
             image = self.detection_images[self.current_detection_index]
-            polygons = self.detection_polygons[self.current_detection_index]
-            camera_id = self.detection_camera_ids[self.current_detection_index]
+            image_type = self.detection_image_types[self.current_detection_index] if self.current_detection_index < len(self.detection_image_types) else 'detection'
             
-            # Draw polygons on image
-            self.current_image_with_detections = self.draw_polygons_on_image(image, polygons)
-            
-            # Update camera label
-            self.camera_id_label.config(text=f"Camera: {camera_id}")
+            if image_type == 'detection':
+                # Handle detection result images with polygons
+                if (self.current_detection_index < len(self.detection_polygons) and 
+                    self.current_detection_index < len(self.detection_camera_ids)):
+                    
+                    polygons = self.detection_polygons[self.current_detection_index]
+                    camera_id = self.detection_camera_ids[self.current_detection_index]
+                    
+                    # Draw polygons on image
+                    self.current_image_with_detections = self.draw_polygons_on_image(image, polygons, self.current_detection_index)
+                    
+                    # Update camera label
+                    self.camera_id_label.config(text=f"Detection Result - Camera: {camera_id}")
+                else:
+                    # Detection image without polygons
+                    self.current_image_with_detections = image
+                    self.camera_id_label.config(text=f"Detection Result {self.current_detection_index + 1}")
+            else:
+                # Handle SuperGlue correspondence images
+                self.current_image_with_detections = image
+                correspondence_index = self.current_detection_index - len([t for t in self.detection_image_types[:self.current_detection_index] if t == 'detection']) + 1
+                total_correspondences = len([t for t in self.detection_image_types if t == 'correspondence'])
+                self.camera_id_label.config(text=f"SuperGlue Correspondence {correspondence_index}/{total_correspondences}")
             
             # Update image display
             self.update_image_display()
+
+    def display_current_viz_image(self):
+        """Display the current SuperGlue correspondence image"""
+        if self.current_viz_index < len(self.viz_images):
+            # Set the current image for display
+            self.current_image_with_detections = self.viz_images[self.current_viz_index]
+            
+            # Update camera label to show viz image info
+            self.camera_id_label.config(text=f"SuperGlue Correspondence {self.current_viz_index + 1}/{len(self.viz_images)}")
+            
+            # Update image display
+            self.showing_viz_images = True
+            self.update_image_display()
+
+    def show_superglue_correspondences_clicked(self):
+        """Handle Show SuperGlue Correspondences button click"""
+        # Check if viz_images is empty
+        if not self.viz_images:
+            messagebox.showwarning("No Correspondences", "No SuperGlue correspondence images available.")
+            return
+        
+        # Reset index and show first image
+        self.current_viz_index = 0
+        self.showing_viz_images = True
+        
+        # Show navigation buttons if multiple images
+        if len(self.viz_images) > 1:
+            self.left_btn.pack(side='left', padx=(0, 2))
+            self.right_btn.pack(side='left')
+        else:
+            self.left_btn.pack_forget()
+            self.right_btn.pack_forget()
+        
+        # Display first viz image
+        self.display_current_viz_image()
 
     def load_image_pcl_clicked(self):
         """Handle Load Image + PCL button click"""
@@ -758,14 +809,22 @@ class TestResultsTab:
         end_time = time.time()
         time_taken = end_time - start_time
 
+        # Create mapping from row index to cluster number
+        row_to_cluster = {row_idx: cluster_num 
+                        for cluster_num, cluster in enumerate(scene_info.consolidated_detections) 
+                        for row_idx in cluster}
+        
+        self.detection_polygons_object_correspondence = np.zeros(len(row_to_cluster), dtype=int)
+
+        for row_idx, cluster_num in row_to_cluster.items():
+            self.detection_polygons_object_correspondence[row_idx] = cluster_num+1
+
         # Display results
         self.display_detection_results(scene_info, time_taken)
         
         # Create point cloud with poses
         self.create_detection_pointcloud_with_poses(photoneo_row, scene_info)
 
-
-            
         del scene_info
         gc.collect()
 
@@ -997,6 +1056,7 @@ class TestResultsTab:
         self.detection_images = []
         self.detection_polygons = []
         self.detection_camera_ids = []
+        self.detection_image_types = []
         self.current_detection_index = 0
         self.current_image_with_detections = None
         
@@ -1036,19 +1096,32 @@ class TestResultsTab:
         # Display MaskRCNN detections count
         nb_detections = scene_info.display_results.get("nb_maskrcnn_detections", 0)
         self.maskrcnn_label.config(text=f"Total MaskRCNN detections: {nb_detections}")
+
+        
         
         # Display consolidated detected objects
         detected_objects = scene_info.display_results.get("detected_objects", [])
         if detected_objects:
-            object_counts = Counter(detected_objects)
+            # Count clusters per object_id
+            object_cluster_count = defaultdict(int)
+
+            for cluster in scene_info.consolidated_detections:
+                # Get the first row index from the cluster
+                first_row_idx = cluster[0]
+                
+                # Get the object_id from that row in detections
+                object_id = scene_info.detections[first_row_idx][0]
+                
+                # Increment the count for this object_id
+                object_cluster_count[object_id] += 1
+
+            # Convert to regular dict (optional)
+            cluster_summary = dict(object_cluster_count)
+
+            # Create formatted text string
+            cluster_summary_text = ", ".join([f"obj {obj_id} x {count}" for obj_id, count in cluster_summary.items()])
             
-            consolidated_text = "Consolidated objects: "
-            consolidated_parts = []
-            for obj_id, count in sorted(object_counts.items()):
-                consolidated_parts.append(f"obj {obj_id} x{count}")
-            consolidated_text += ", ".join(consolidated_parts)
-            
-            self.objects_label.config(text=consolidated_text)
+            self.objects_label.config(text="Conslidated detections: " + cluster_summary_text)
             
         else:
             self.objects_label.config(text="No objects detected")
@@ -1087,21 +1160,35 @@ class TestResultsTab:
         self.detection_camera_ids = scene_info.display_results.get("camera_ids", [])
         self.current_detection_index = 0
         
-        # Show navigation buttons if multiple images
+        # Initialize image types for detection images
+        self.detection_image_types = ['detection'] * len(self.detection_images)
+        
+        # Append SuperGlue correspondence images automatically
+        viz_images = scene_info.display_results.get("feature_matching_images", [])
+        if viz_images:
+            self.detection_images.extend(viz_images)
+            self.detection_image_types.extend(['correspondence'] * len(viz_images))
+            # For correspondence images, we don't have polygons or camera_ids, so extend with empty values
+            self.detection_polygons.extend([[] for _ in viz_images])
+            self.detection_camera_ids.extend(['' for _ in viz_images])
+        
+        # Show navigation buttons if multiple images (detection + correspondence)
         if len(self.detection_images) > 1:
             self.left_btn.pack(side='left', padx=(0, 2))
             self.right_btn.pack(side='left')
         
-        # Display first detection image if available
+        # Display first image if available
         if self.detection_images:
             self.display_current_detection_image()
 
-    def draw_polygons_on_image(self, image, polygons):
+    def draw_polygons_on_image(self, image, polygons, cluster_idx):
         """Draw polygons on image and return the result"""
         image_copy = image.copy()
         
         # Colors for different polygons
         colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255)]
+
+        
         
         for i, polygon in enumerate(polygons):
             if len(polygon["points"]) >= 3:  # Need at least 3 points for a polygon
@@ -1118,8 +1205,10 @@ class TestResultsTab:
                         overlay = image_copy.copy()
                         cv2.fillPoly(overlay, [polygon_np], color)
                         cv2.addWeighted(overlay, 0.3, image_copy, 0.7, 0, image_copy)
-                        cv2.putText(image_copy, polygon["label"], tuple(polygon_np[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                        cv2.putText(image_copy, polygon["label"], tuple(polygon_np[0]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 1)
                         cv2.circle(image_copy, polygon["geometric_center"], 5, (255, 255, 255), -1)
+                        detection_idx = sum(len(cluster) for cluster in self.detection_polygons[:cluster_idx]) + i
+                        cv2.putText(image_copy, "Result " + str(self.detection_polygons_object_correspondence[detection_idx]), tuple(polygon_np[int(len(polygon_np)/2)]), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
 
                 except Exception as e:
                     print(f"Error drawing polygon {i}: {e}")
@@ -1182,6 +1271,7 @@ class TestResultsTab:
             self.detection_images = []
             self.detection_polygons = []
             self.detection_camera_ids = []
+            self.detection_image_types = []
             self.current_detection_index = 0
             
             # Hide navigation buttons and clear camera label
@@ -1235,7 +1325,7 @@ class TestResultsTab:
         if self.current_image is None:
             return
         
-        # Priority order: detection results, then original image
+        # Priority order: detection results (including correspondence), then original image
         if self.current_image_with_detections is not None:
             display_image = self.current_image_with_detections
         else:
