@@ -20,7 +20,7 @@ class SuperGlueMatcher:
             },
             'superglue': {
                 'weights': 'indoor',
-                'sinkhorn_iterations': 30,
+                'sinkhorn_iterations': 100,
                 'match_threshold': 0.4,
             }
         }
@@ -29,10 +29,77 @@ class SuperGlueMatcher:
         self.device = device
         torch.set_grad_enabled(False)
     
+    def crop_to_foreground(self, image):
+        """
+        Crop image to foreground (non-zero pixels) and return cropped image with offset info.
+        
+        Args:
+            image: RGB mask image
+            
+        Returns:
+            cropped_image: Cropped image
+            crop_offset: (x_offset, y_offset) - offset of the crop in original image
+            crop_info: dict with crop boundaries for debugging
+        """
+        # Convert to grayscale to find non-zero regions
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image
+            
+        # Find bounding box of non-zero pixels
+        coords = np.argwhere(gray > 0)
+        
+        if len(coords) == 0:
+            # If no foreground found, return original image
+            return image, (0, 0), {'x_min': 0, 'y_min': 0, 'x_max': image.shape[1], 'y_max': image.shape[0]}
+        
+        # Get bounding box coordinates
+        y_min, x_min = coords.min(axis=0)
+        y_max, x_max = coords.max(axis=0)
+        
+        # Add small padding if possible
+        padding = 10
+        y_min = max(0, y_min - padding)
+        x_min = max(0, x_min - padding)
+        y_max = min(image.shape[0], y_max + padding)
+        x_max = min(image.shape[1], x_max + padding)
+        
+        # Crop the image
+        cropped_image = image[y_min:y_max, x_min:x_max]
+        crop_offset = (x_min, y_min)
+        crop_info = {'x_min': x_min, 'y_min': y_min, 'x_max': x_max, 'y_max': y_max}
+        
+        return cropped_image, crop_offset, crop_info
+    
+    def map_keypoints_to_original(self, keypoints, crop_offset, scales):
+        """
+        Map keypoints from cropped image coordinates back to original image coordinates.
+        
+        Args:
+            keypoints: Keypoints in cropped image coordinates
+            crop_offset: (x_offset, y_offset) from cropping
+            scales: Scaling factors from resizing
+            
+        Returns:
+            keypoints_original: Keypoints in original image coordinates
+        """
+        # First, scale back from resized coordinates to cropped coordinates
+        keypoints_cropped = keypoints * np.array([scales[0], scales[1]])
+        
+        # Then, add the crop offset to get original coordinates
+        keypoints_original = keypoints_cropped + np.array([crop_offset[0], crop_offset[1]])
+        
+        return keypoints_original
+    
     def superglue(self, img0, img1):
-
-       
-
+        # Crop images to foreground
+        img0_cropped, crop_offset0, crop_info0 = self.crop_to_foreground(img0)
+        img1_cropped, crop_offset1, crop_info1 = self.crop_to_foreground(img1)
+        
+        print(f"Image 0 crop offset: {crop_offset0}, crop info: {crop_info0}")
+        print(f"Image 1 crop offset: {crop_offset1}, crop info: {crop_info1}")
+        
         # Prepare images - convert to grayscale tensors like the working script
         def image_to_tensor(image):
             # Convert to grayscale (SuperPoint expects 1 channel)
@@ -51,9 +118,9 @@ class SuperGlueMatcher:
             inp = torch.from_numpy(gray/255.).float()[None, None].to(self.device)
             return inp, scales
         
-        frame0_tensor, scales = image_to_tensor(img0)
-        frame1_tensor, scales = image_to_tensor(img1)
-
+        # Process cropped images
+        frame0_tensor, scales0 = image_to_tensor(img0_cropped)
+        frame1_tensor, scales1 = image_to_tensor(img1_cropped)
 
         # Perform the matching.
         pred = self.matching({'image0': frame0_tensor, 'image1': frame1_tensor})
@@ -65,40 +132,35 @@ class SuperGlueMatcher:
         out_matches = {'keypoints0': kpts0, 'keypoints1': kpts1,
                         'matches': matches, 'match_confidence': conf}
         
-
         # Keep the matching keypoints.
         valid = matches > -1
         mkpts0 = kpts0[valid]
         mkpts1 = kpts1[matches[valid]]
         mconf = conf[valid]
-
         
+        # Map keypoints back to original image coordinates
+        mkpts0_org = self.map_keypoints_to_original(mkpts0, crop_offset0, scales0)
+        mkpts1_org = self.map_keypoints_to_original(mkpts1, crop_offset1, scales1)
         
-        mkpts0_org = mkpts0 * np.array([scales[0], scales[1]])
-        mkpts1_org = mkpts1 * np.array([scales[0], scales[1]])
-
-        mkpts1_org_w_offset = mkpts1 * np.array([scales[0], scales[1]])
+        # For visualization, create offset coordinates for second image
+        mkpts1_org_w_offset = mkpts1_org.copy()
         mkpts1_org_w_offset[:, 0] += img0.shape[1]  # Offset for second image
-
-        
 
         num_matches = None
         viz_image = None
         h_mat = None
 
-
         if mkpts0.shape[0] > 3 and mkpts1.shape[0] > 3:
             
-            # Convert to float32
+            # Convert to float32 - using original coordinates for homography
             src_pts = np.float32(mkpts0_org).reshape(-1, 1, 2)
-            dst_pts = np.float32(mkpts1_org_w_offset).reshape(-1, 1, 2)
+            dst_pts = np.float32(mkpts1_org).reshape(-1, 1, 2)
             
             # Compute homography with RANSAC (robust to outliers)
             h_mat, mask = cv2.findHomography(src_pts, dst_pts, 
                                         cv2.RANSAC, 
                                         ransacReprojThreshold=3.0)
 
-            
             if h_mat is not None:
                 
                 warped = cv2.warpPerspective(img0, h_mat, (img0.shape[1]*2, img0.shape[0]))
@@ -113,7 +175,7 @@ class SuperGlueMatcher:
                 num_matches = len(mkpts0)
                 viz_image = np.hstack((img0, img1))
 
-
+                # Draw matches using original image coordinates
                 for pt0, pt1 in zip(mkpts0_org.astype(int), mkpts1_org_w_offset.astype(int)):
                     cv2.circle(viz_image, tuple(pt0), 2, (0,255,0), -1)
                     cv2.circle(viz_image, tuple(pt1), 2, (0,0,255), -1)
@@ -123,4 +185,4 @@ class SuperGlueMatcher:
             
                 return num_matches, mconf, viz_image, h_mat, mkpts0_org.astype(int), mkpts1_org.astype(int)
             
-        return None, None, None, None, None, None 
+        return None, None, None, None, None, None
