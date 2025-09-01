@@ -92,13 +92,79 @@ class SuperGlueMatcher:
         
         return keypoints_original
     
+    def validate_homography_matrix(self, h_mat):
+        """Validate mathematical properties of homography matrix"""
+        # Check determinant (should be positive, not too extreme)
+        det = np.linalg.det(h_mat)
+        if det <= 0 or det > 10 or det < 0.1:
+            return False, f"Bad determinant: {det:.3f}"
+        
+        # Check condition number (well-conditioned matrix)
+        cond_num = np.linalg.cond(h_mat)
+        if cond_num > 1000:  # Threshold may need tuning
+            return False, f"Poorly conditioned matrix: {cond_num:.2f}"
+        
+        # Check for reasonable scale factors using SVD
+        U, s, Vt = np.linalg.svd(h_mat[:2, :2])  # Upper 2x2 for scale/rotation
+        scale_ratio = s.max() / s.min()
+        if scale_ratio > 5.0:  # Max 5x scaling difference
+            return False, f"Extreme scaling: {scale_ratio:.2f}"
+        
+        return True, "Matrix properties OK"
+    
+    def validate_mask_alignment(self, img0, img1, h_mat, iou_threshold=0.4):
+        """Validate alignment quality for mask images using IoU"""
+        # Transform first mask to align with second
+        warped_mask0 = cv2.warpPerspective(img0, h_mat, 
+                                          (img1.shape[1], img1.shape[0]))
+        
+        # Convert to binary masks for IoU calculation
+        mask0_bin = (warped_mask0 > 0).astype(np.uint8)
+        mask1_bin = (img1 > 0).astype(np.uint8)
+        
+        # Calculate IoU (Intersection over Union)
+        intersection = np.logical_and(mask0_bin, mask1_bin)
+        union = np.logical_or(mask0_bin, mask1_bin)
+        
+        if np.sum(union) == 0:
+            return False, "No union area - empty masks"
+        
+        iou = np.sum(intersection) / np.sum(union)
+        
+        if iou < iou_threshold:
+            return False, f"Low IoU: {iou:.3f} < {iou_threshold}"
+        
+        return True, f"Good alignment: IoU={iou:.3f}"
+    
+    def validate_homography_combined(self, img0, img1, h_mat):
+        """Combined validation using matrix condition and mask alignment"""
+        validations = []
+        
+        # 1. Matrix properties validation
+        # is_valid, msg = self.validate_homography_matrix(h_mat)
+        # validations.append(("Matrix", is_valid, msg))
+        
+        # 2. Mask alignment validation
+        is_valid, msg = self.validate_mask_alignment(img0, img1, h_mat)
+        validations.append(("Alignment", is_valid, msg))
+        
+        # Both validations must pass
+        overall_valid = all(valid for name, valid, msg in validations)
+        
+        # # print validation results
+        for name, valid, msg in validations:
+            status = "✓" if valid else "✗"
+            # print(f"{status} {name}: {msg}")
+        
+        return overall_valid, validations
+
     def superglue(self, img0, img1):
         # Crop images to foreground
         img0_cropped, crop_offset0, crop_info0 = self.crop_to_foreground(img0)
         img1_cropped, crop_offset1, crop_info1 = self.crop_to_foreground(img1)
         
-        print(f"Image 0 crop offset: {crop_offset0}, crop info: {crop_info0}")
-        print(f"Image 1 crop offset: {crop_offset1}, crop info: {crop_info1}")
+        # print(f"Image 0 crop offset: {crop_offset0}, crop info: {crop_info0}")
+        # print(f"Image 1 crop offset: {crop_offset1}, crop info: {crop_info1}")
         
         # Prepare images - convert to grayscale tensors like the working script
         def image_to_tensor(image):
@@ -163,14 +229,19 @@ class SuperGlueMatcher:
 
             if h_mat is not None:
                 
-                warped = cv2.warpPerspective(img0, h_mat, (img0.shape[1]*2, img0.shape[0]))
-                # Check actual image content preservation
-                area_orig = np.count_nonzero(img1)
-                area_trans = np.count_nonzero(warped)
-
-                if area_trans / area_orig > 4 or area_trans / area_orig < 0.6:
-                    print(f"Extreme content change: {area_trans / area_orig}")
+                # Use comprehensive validation instead of simple area check
+                is_valid, validation_results = self.validate_homography_combined(img0, img1, h_mat)
+                
+                if not is_valid:
+                    # print("Homography validation failed:")
+                    for name, valid, msg in validation_results:
+                        if not valid:
+                            print(f"  - {name}: {msg}")
                     return None, None, None, None, None, None
+                
+                # print("Homography validation passed!")
+                
+                warped = cv2.warpPerspective(img0, h_mat, (img0.shape[1]*2, img0.shape[0]))
                 
                 num_matches = len(mkpts0)
                 viz_image = np.hstack((img0, img1))

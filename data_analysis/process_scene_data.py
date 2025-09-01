@@ -1,5 +1,6 @@
 import os
 import sys
+from unittest import result
 import yaml 
 import cv2
 import time
@@ -21,8 +22,12 @@ from superglue import SuperGlueMatcher
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.', 'maskRCNN')))
 from inference import infer
 
+sys.path.append('/home/ram/bpc_ws/bpc/pose_estimation_nn')
+from estimate_pose import PoseEstimator
+
 from update_detection_json import add_3d_centers_to_json, find_valid_neighbor_pixel, transform_3d_point,  transform_pose_to_world
 from pose_estimator import compute_rigid_transform
+
 
 class process_scene_data:
     
@@ -54,6 +59,7 @@ class process_scene_data:
         self.consolidated_detections = []
         self.detections_homographies = [] 
 
+        self.pose_predictor = PoseEstimator("/home/ram/bpc_ws/bpc/pose_estimation_nn/weights/pose_model.pth")
 
         # self.do_feature_matchings()
 
@@ -131,7 +137,7 @@ class process_scene_data:
             for mask_idx, mask in enumerate(detection_data['results'][0]['masks']):
                 object_id = mask['label']
                 location_world = mask['object_center_3d_world']
-                print("object ID: ", object_id, " camera ID: ", camera_id, " location_world: ", location_world, " location_camera: ", mask['object_center_3d_local'])
+                # print("object ID: ", object_id, " camera ID: ", camera_id, " location_world: ", location_world, " location_camera: ", mask['object_center_3d_local'])
                 self.detections.append([object_id, camera_id, location_world, mask_idx, row_num])
 
         # print("detections: ", self.detections)
@@ -170,14 +176,14 @@ class process_scene_data:
                 
                 self.consolidated_detections.append(cluster)
         
-        print("consolidated_detections: ", self.consolidated_detections)
+        # print("consolidated_detections: ", self.consolidated_detections)
 
 
 
     def do_feature_matchings(self):
         
         for i in range(0,len(self.consolidated_detections)):
-            print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
+            # print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
             
             self.display_results["nb_maskrcnn_detections"] = self.consolidated_detections[i][0]
 
@@ -204,9 +210,9 @@ class process_scene_data:
                                                     camera_id = camera_id, 
                                                     object_id = object_id)
                 
-                if num_matches is not None:
+                if num_matches is not None: # refer self.compare_masked_images - it explains the None here
 
-                    K = np.array([float(self.scene_data[row_num][f'k{i//3+1}{i%3+1}']) for i in range(9)]).reshape(3, 3)
+                    K = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3)
                     # Extract depth scale
                     depth_scale = float(self.scene_data[row_num]['depth_scale'])
 
@@ -239,10 +245,11 @@ class process_scene_data:
                         save_match_img_path = os.path.join(self.meta_data_path, "matches_scene_" + str(scene_id)  + "_image_" + str(image_id) + "_cam_" + camera_id + "_obj_" + str(object_id) + "_mask_" + str(mask_idx) + ".png")
                         
                         os.makedirs(self.meta_data_path, exist_ok=True)
-                        cv2.putText(viz_image, f"Scene: {scene_id}, Image: {image_id}, Cam: {camera_id}, Obj: {object_id}, Mask: {mask_idx}", (100, 100), cv2.FONT_HERSHEY_SIMPLEX, 3.2, (255, 255, 255), 1)
+                        cv2.putText(viz_image, f"Scene: {scene_id}, Image: {image_id}, Cam: {camera_id}, Obj: {object_id}, Mask: {mask_idx}", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 1)
                         cv2.imwrite(save_match_img_path, viz_image)
 
                         result = {'scene_cam_row_num': row_num,
+                                'camera_id': camera_id,
                                 'mask_idx': mask_idx,
                                 'object_idx': object_id,
                                 'ref_row': ref_row,
@@ -260,20 +267,21 @@ class process_scene_data:
                         
                         break
                     
-                    elif j == len(self.consolidated_detections[i])-1:
-                        result = {'scene_cam_row_num': row_num,
-                                'mask_idx': mask_idx,
-                                'object_idx': object_id,
-                                'ref_row': ref_row,
-                                'h_mat': h_mat,
-                                'confidence': confidence,
-                                'num_matches': 0,
-                                'matched_points0': matched_points0,
-                                'matched_points1': matched_points1,
-                                'matched_points0_3d' : matched_points0_3d,
-                                'matched_points1_3d' : matched_points1_3d}
+                if j == len(self.consolidated_detections[i])-1 and len(self.detections_homographies) < i+1:
+                    result = {'scene_cam_row_num': row_num,
+                            'camera_id': camera_id,
+                            'mask_idx': mask_idx,
+                            'object_idx': object_id,
+                            'ref_row': ref_row,
+                            'h_mat': h_mat,
+                            'confidence': confidence,
+                            'num_matches': 0,
+                            'matched_points0': matched_points0,
+                            'matched_points1': matched_points1,
+                            'matched_points0_3d' : None,
+                            'matched_points1_3d' : None}
 
-                        self.detections_homographies.append(result)
+                    self.detections_homographies.append(result)
                     
     def compare_masked_images(self, test_img, test_polygon_mask, camera_id, object_id):
         
@@ -300,43 +308,21 @@ class process_scene_data:
                 # Use it
                 
                 num_matches, confidence, viz_image, h_mat, matched_points0, matched_points1 = matcher.superglue(masked_test, masked_ref)
-
+                # if num_matches is not None:
                 if num_matches is not None:
-
-                    num_matches, confidence, viz_image, h_mat, matched_points0, matched_points1 = matcher.superglue(masked_test, masked_ref)
-                   
-
-                    # if num_matches is not None:
-                    if num_matches is not None:
-                        if num_matches>4:
-                            return num_matches, confidence, viz_image, h_mat, row, matched_points0, matched_points1
+                    if num_matches>4:
+                        return num_matches, confidence, viz_image, h_mat, row, matched_points0, matched_points1
 
                     
         
         return None, None, None, None, None, None, None
     
 
-    
     def compute_6d_poses(self):
         if self.detections_homographies is None:
             return 
         
         for result in self.detections_homographies:
-
-            ref_row = result['ref_row']
-
-            # this is the pose of the reference object wrt camera
-            R_ref_cam = [[ref_row['r11'], ref_row['r12'], ref_row['r13']], 
-                           [ref_row['r21'], ref_row['r22'], ref_row['r23']], 
-                           [ref_row['r31'], ref_row['r32'], ref_row['r33']] ]
-
-            T_ref_cam = [ref_row['tx'], ref_row['ty'], ref_row['tz']]
-
-            R_ref_cam = np.array([[float(val) for val in row] for row in R_ref_cam])
-            T_ref_cam = np.array([float(val) for val in T_ref_cam]) 
-            
-            matched_points0_3d = result['matched_points0_3d']
-            matched_points1_3d = result['matched_points1_3d']
 
             # print("Camera id", ref_row['camera_type'])
 
@@ -346,12 +332,40 @@ class process_scene_data:
             test_center_3d_world = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_world']
             # print("test center 3D world: ", test_center_3d_world)
 
+            
+
             if result['num_matches'] == 0:
                 result['T'] = test_center_3d_world
-                result['R'] = R_ref_cam
+                    
                 result['rmse'] = 0.5
 
+                image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
+                polygon_mask = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
+
+                result['R'] = self.pose_predictor.estimate_pose(image, [polygon_mask])
+
+                R_test_cam = result['R']
+                T_test_cam = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
+
+                camera_id = result['camera_id']
+                object_id = result['object_idx']
+
             else:
+
+                ref_row = result['ref_row']
+
+                # this is the pose of the reference object wrt camera
+                R_ref_cam = [[ref_row['r11'], ref_row['r12'], ref_row['r13']], 
+                            [ref_row['r21'], ref_row['r22'], ref_row['r23']], 
+                            [ref_row['r31'], ref_row['r32'], ref_row['r33']] ]
+
+                T_ref_cam = [ref_row['tx'], ref_row['ty'], ref_row['tz']]
+
+                R_ref_cam = np.array([[float(val) for val in row] for row in R_ref_cam])
+                T_ref_cam = np.array([float(val) for val in T_ref_cam]) 
+                
+                matched_points0_3d = result['matched_points0_3d']
+                matched_points1_3d = result['matched_points1_3d']
 
                 matched_points0_wrt_world = []
                 for pt in matched_points0_3d:
@@ -380,19 +394,26 @@ class process_scene_data:
 
                 # print("T_test_world: ", T_test_world)
 
+                # Two-line solution:
+                distance = np.linalg.norm(np.array(test_center_3d_world) - np.array(T_test_world))
+                T_test_world = test_center_3d_world if distance > 150 else T_test_world
+
                 result['R'] = R_test_world
                 result['T'] = T_test_world
                 result['rmse'] = rmse 
 
-                self.display_results["results_summary"].append({
-                    "camera ID": ref_row['camera_type'],
-                    "object ID": ref_row['object_id'],
-                    "R_test_cam": R_test_cam,
-                    "T_test_cam": T_test_cam,
-                    "R_test_world": R_test_world,
-                    "T_test_world": T_test_world,
-                    "rmse": rmse
-                })
+                camera_id = ref_row['camera_type']
+                object_id = ref_row['object_id']
+
+            self.display_results["results_summary"].append({
+                "camera ID": camera_id,
+                "object ID": object_id,
+                "R_test_cam": R_test_cam,
+                "T_test_cam": T_test_cam,
+                "R_test_world": result['R'],
+                "T_test_world":  result['T'],
+                "rmse": result['rmse']
+            })
 
 
     

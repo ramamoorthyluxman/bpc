@@ -675,8 +675,8 @@ class TestResultsTab:
             image_index = row_values[3]  # image_index
             depth_scale = row_values[45] if len(row_values) > 45 else "1000"
             
-            print(f"Loading: {image_path}")
-            print(f"Camera: {camera_type}, Scene: {scene_id}, Index: {image_index}")
+            # print(f"Loading: {image_path}")
+            # print(f"Camera: {camera_type}, Scene: {scene_id}, Index: {image_index}")
             
             # Find corresponding depth image path
             rgb_dir = os.path.dirname(image_path)
@@ -696,7 +696,7 @@ class TestResultsTab:
             image_filename = os.path.basename(image_path)
             depth_path = os.path.join(depth_dir, image_filename)
             
-            print(f"Looking for depth at: {depth_path}")
+            # print(f"Looking for depth at: {depth_path}")
             
             # Check if files exist
             if not os.path.exists(image_path):
@@ -713,7 +713,7 @@ class TestResultsTab:
                 messagebox.showerror("Error", "Could not load camera parameters")
                 return
             
-            print(f"K matrix:\n{k_matrix}")
+            # print(f"K matrix:\n{k_matrix}")
             
             # Load and display RGB image
             self.load_and_display_image(image_path)
@@ -742,11 +742,11 @@ class TestResultsTab:
             frame.transform(transformation)
             
             # Debug print
-            print(f"Applied transformation with T: {T_vector}")
+            # print(f"Applied transformation with T: {T_vector}")
             
             return frame
         except Exception as e:
-            print(f"Error creating coordinate frame: {e}")
+            # print(f"Error creating coordinate frame: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -800,11 +800,23 @@ class TestResultsTab:
 
         start_time = time.time()
         scene_info = process_scene_data(matching_rows)
+        start_time = time.time()
         scene_info.mask_objects()
+        end = time.time()
+        print(f"MaskRcnn took: {end - start_time:.6f} seconds")
+        start_time = time.time()
         scene_info.consolidate_detections()
-
+        end = time.time()
+        print(f"Consolidating took: {end - start_time:.6f} seconds")
+        start_time = time.time()
         scene_info.do_feature_matchings()
+        end = time.time()
+        print(f"Feature matching took: {end - start_time:.6f} seconds")
+        start_time = time.time()
         scene_info.compute_6d_poses()
+        end = time.time()
+        print(f"6D pose computation took: {end - start_time:.6f} seconds")
+
 
         end_time = time.time()
         time_taken = end_time - start_time
@@ -839,7 +851,7 @@ class TestResultsTab:
             depth_scale = photoneo_row['depth_scale']
             image_index = photoneo_row['image_index']
             
-            print(f"Creating detection point cloud from photoneo: {image_path}")
+            # print(f"Creating detection point cloud from photoneo: {image_path}")
             
             # Find corresponding depth image path
             rgb_dir = os.path.dirname(image_path)
@@ -849,7 +861,7 @@ class TestResultsTab:
             image_filename = os.path.basename(image_path)
             depth_path = os.path.join(depth_dir, image_filename)
             
-            print(f"Looking for photoneo depth at: {depth_path}")
+            # print(f"Looking for photoneo depth at: {depth_path}")
             
             # Check if files exist
             if not os.path.exists(image_path):
@@ -863,16 +875,16 @@ class TestResultsTab:
             if k_matrix is None:
                 raise ValueError("Could not load photoneo camera parameters")
             
-            print(f"Photoneo K matrix:\n{k_matrix}")
+            # print(f"Photoneo K matrix:\n{k_matrix}")
 
             # Check depth image properties first
             depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
             if depth_image is None:
                 raise ValueError("Could not load depth image")
             
-            print(f"Depth image shape: {depth_image.shape}")
-            print(f"Depth image dtype: {depth_image.dtype}")
-            print(f"Depth min/max: {depth_image.min()}/{depth_image.max()}")
+            # print(f"Depth image shape: {depth_image.shape}")
+            # print(f"Depth image dtype: {depth_image.dtype}")
+            # print(f"Depth min/max: {depth_image.min()}/{depth_image.max()}")
             
             # Create base point cloud using existing function
             point_cloud_original, colors_original = create_pointcloud_with_colors(
@@ -883,7 +895,7 @@ class TestResultsTab:
                 use_gpu=True,
             )
             
-            print(f"Original photoneo point cloud created with {len(point_cloud_original)} points")
+            # print(f"Original photoneo point cloud created with {len(point_cloud_original)} points")
             
             if len(point_cloud_original) > 0:
                 # Filter out invalid points
@@ -894,7 +906,7 @@ class TestResultsTab:
                     valid_points = point_cloud_original[valid_mask]
                     valid_colors = colors_original[valid_mask]
                     
-                    print(f"Filtered {len(valid_points)} valid points from {len(point_cloud_original)} total")
+                    # print(f"Filtered {len(valid_points)} valid points from {len(point_cloud_original)} total")
 
 
                     # Create the mask
@@ -904,7 +916,7 @@ class TestResultsTab:
                     filtered_points = valid_points[mask]
                     filtered_colors = valid_colors[mask]
 
-                    print(f"Outliers filtered {len(filtered_points)} valid points from {len(point_cloud_original)} total")
+                    # print(f"Outliers filtered {len(filtered_points)} valid points from {len(point_cloud_original)} total")
                     
                     # Create Open3D point cloud
                     self.current_point_cloud = o3d.geometry.PointCloud()
@@ -928,8 +940,8 @@ class TestResultsTab:
                                 T_vector = np.array(T_test_world, dtype=float)
 
 
-                                print("R_matrix: ", R_matrix)
-                                print("T_vector: ", T_vector)
+                                # print("R_matrix: ", R_matrix)
+                                # print("T_vector: ", T_vector)
                                 
                                 
                                 # Create transformation matrix
@@ -941,7 +953,7 @@ class TestResultsTab:
                                 self.detected_poses_transformation_matrix.append(transformation_matrix)
                                 
                         except Exception as e:
-                            print(f"Error creating pose marker for result {i}: {e}")
+                            # print(f"Error creating pose marker for result {i}: {e}")
                             continue
                     
                     # Update status
@@ -951,7 +963,7 @@ class TestResultsTab:
                         foreground="green"
                     )
                     
-                    print(f"Detection point cloud created with {len(self.current_point_cloud.points)} points and {num_poses} pose markers")
+                    # print(f"Detection point cloud created with {len(self.current_point_cloud.points)} points and {num_poses} pose markers")
                     
                 else:
                     self.current_point_cloud = None
@@ -967,7 +979,7 @@ class TestResultsTab:
                 )
                 
         except Exception as e:
-            print(f"Error creating detection point cloud: {e}")
+            # print(f"Error creating detection point cloud: {e}")
             import traceback
             traceback.print_exc()
             
@@ -995,34 +1007,34 @@ class TestResultsTab:
             pc_min = points.min(axis=0)
             pc_max = points.max(axis=0)
             pc_size = np.max(pc_max - pc_min)
-            print("Test pc_size: ", pc_size)
+            # print("Test pc_size: ", pc_size)
             axis_size = pc_size * 0.05
             
             origin_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
             origin_frame.translate([0, 0, 0])
             geometries.append(origin_frame)
-            print("Added basic origin coordinate frame")
+            # print("Added basic origin coordinate frame")
             
             # Add coordinate frames if they exist (from detection results)
         
-            print("Adding detection coordinate frames to 3D viewer:")
+            # print("Adding detection coordinate frames to 3D viewer:")
             for i, frame in enumerate(self.detected_poses_transformation_matrix):
                 coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
-                print("Test transformation matrix: ", frame)
+                # print("Test transformation matrix: ", frame)
                 coord_frame.transform(frame)
                 geometries.append(coord_frame)
                 center = np.asarray(coord_frame.get_center())
-                print(f"Frame {i} center: {center}")      
+                # print(f"Frame {i} center: {center}")      
                 # Add red sphere marker at original pose location
                 pose_position = frame[:3, 3]
                 marker_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=axis_size*0.01)
                 marker_sphere.paint_uniform_color([1.0, 0.0, 0.0])  # Red marker
                 marker_sphere.translate(pose_position)
                 geometries.append(marker_sphere)          
-            print(f"Added {len(self.detected_poses_transformation_matrix)} coordinate frames")
+            # print(f"Added {len(self.detected_poses_transformation_matrix)} coordinate frames")
             
             
-            print(f"Total geometries to display: {len(geometries)}")
+            # print(f"Total geometries to display: {len(geometries)}")
             
             # Determine window title based on content
             if hasattr(self, 'detected_poses_transformation_matrix') and self.detected_poses_transformation_matrix:
@@ -1031,7 +1043,7 @@ class TestResultsTab:
                 window_title = "Point Cloud Viewer"
             
             # Use the draw_geometries function
-            print(f"Opening {window_title}...")
+            # print(f"Opening {window_title}...")
             o3d.visualization.draw_geometries(
                 geometries,
                 window_name=window_title,
@@ -1211,7 +1223,7 @@ class TestResultsTab:
                         cv2.putText(image_copy, "Result " + str(self.detection_polygons_object_correspondence[detection_idx]), tuple(polygon_np[int(len(polygon_np)/2)]), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1)
 
                 except Exception as e:
-                    print(f"Error drawing polygon {i}: {e}")
+                    # print(f"Error drawing polygon {i}: {e}")
                     continue
         
         return image_copy
@@ -1228,10 +1240,10 @@ class TestResultsTab:
                 # Try numeric camera ID
                 scene_camera_file = os.path.join(dataset_dir, f"scene_camera_cam{camera_type}.json")
             
-            print(f"Loading camera params from: {scene_camera_file}")
+            # print(f"Loading camera params from: {scene_camera_file}")
             
             if not os.path.exists(scene_camera_file):
-                print(f"Camera file not found, trying alternative...")
+                # print(f"Camera file not found, trying alternative...")
                 # Try alternative naming
                 scene_camera_file = os.path.join(dataset_dir, f"scene_camera_{camera_type}.json")
                 if not os.path.exists(scene_camera_file):
@@ -1246,7 +1258,7 @@ class TestResultsTab:
             elif int(image_index) in scene_cameras:
                 cam_params = scene_cameras[int(image_index)]
             else:
-                print(f"Image index {image_index} not found in camera file")
+                # print(f"Image index {image_index} not found in camera file")
                 return None
             
             # Extract K matrix
@@ -1254,7 +1266,7 @@ class TestResultsTab:
             return k_matrix
             
         except Exception as e:
-            print(f"Error loading camera parameters: {e}")
+            # print(f"Error loading camera parameters: {e}")
             return None
 
     def load_and_display_image(self, image_path):
@@ -1288,7 +1300,7 @@ class TestResultsTab:
             else:  # Small image
                 self.image_scale = 1.0
             
-            print(f"Loaded test image: {width}x{height}, starting scale: {self.image_scale}")
+            # print(f"Loaded test image: {width}x{height}, starting scale: {self.image_scale}")
             
             # Display image
             self.update_image_display()
@@ -1356,16 +1368,16 @@ class TestResultsTab:
     def create_and_display_pointcloud(self, depth_path, rgb_path, k_matrix, depth_scale):
         """Create and display 3D point cloud using Open3D"""
         try:
-            print(f"Creating point cloud from depth: {depth_path}")
+            # print(f"Creating point cloud from depth: {depth_path}")
             
             # Check depth image properties first
             depth_image = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
             if depth_image is None:
                 raise ValueError("Could not load depth image")
             
-            print(f"Depth image shape: {depth_image.shape}")
-            print(f"Depth image dtype: {depth_image.dtype}")
-            print(f"Depth min/max: {depth_image.min()}/{depth_image.max()}")
+            # print(f"Depth image shape: {depth_image.shape}")
+            # print(f"Depth image dtype: {depth_image.dtype}")
+            # print(f"Depth min/max: {depth_image.min()}/{depth_image.max()}")
             
             # Create point cloud using the provided function
             point_cloud_original, colors_original = create_pointcloud_with_colors(
@@ -1376,7 +1388,7 @@ class TestResultsTab:
                 use_gpu=False,
             )
             
-            print(f"Original point cloud created with {len(point_cloud_original)} points")
+            # print(f"Original point cloud created with {len(point_cloud_original)} points")
             
             if len(point_cloud_original) > 0:
                 # Filter out invalid points (inf, nan, zero depth)
@@ -1387,14 +1399,14 @@ class TestResultsTab:
                     valid_points = point_cloud_original[valid_mask]
                     valid_colors = colors_original[valid_mask]
                     
-                    print(f"Filtered {len(valid_points)} valid points from {len(point_cloud_original)} total")
+                    # print(f"Filtered {len(valid_points)} valid points from {len(point_cloud_original)} total")
                     
                     # Create Open3D point cloud
                     self.current_point_cloud = o3d.geometry.PointCloud()
                     self.current_point_cloud.points = o3d.utility.Vector3dVector(valid_points)
                     self.current_point_cloud.colors = o3d.utility.Vector3dVector(valid_colors / 255.0)
                     
-                    # print(f"Open3D point cloud created with {len(self.current_point_cloud.points)} points")
+                    # # print(f"Open3D point cloud created with {len(self.current_point_cloud.points)} points")
                     
                     # Update status
                     self.pcl_status_label.config(
@@ -1417,11 +1429,11 @@ class TestResultsTab:
                     text="No valid points found - check depth scale and image format",
                     foreground="red"
                 )
-                print("No valid points found - check depth scale and image format")
+                # print("No valid points found - check depth scale and image format")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create point cloud:\n{str(e)}")
-            print(f"Point cloud error: {e}")
+            # print(f"Point cloud error: {e}")
             import traceback
             traceback.print_exc()
             

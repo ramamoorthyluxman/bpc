@@ -9,22 +9,55 @@ from torchvision import transforms, models
 import os
 import argparse
 from tqdm import tqdm
+import ast
 
 class PoseDataset(Dataset):
     def __init__(self, csv_file, transform=None):
         self.data = pd.read_csv(csv_file)
+        # Filter out rows with missing polygon_mask data
+        self.data = self.data.dropna(subset=['polygon_mask'])
+        # Reset index after filtering
+        self.data = self.data.reset_index(drop=True)
         self.transform = transform
+        print(f"Loaded {len(self.data)} samples with valid polygon masks")
         
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
-        row = self.data.iloc[idx]
+        try:
+            row = self.data.iloc[idx]
+            
+            # Load original RGB image
+            image_path = row['image_path']
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not load image: {image_path}")
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Parse polygon mask from CSV
+            polygon_mask_str = row['polygon_mask']
+            
+            # Check if polygon_mask_str is valid
+            if pd.isna(polygon_mask_str) or polygon_mask_str == '' or polygon_mask_str == 'nan':
+                raise ValueError(f"Invalid polygon mask data at index {idx}")
+                
+            polygon_points = ast.literal_eval(polygon_mask_str)
+            polygon_points = np.array(polygon_points, dtype=np.int32)
+            
+        except Exception as e:
+            print(f"Error processing sample {idx}: {e}")
+            # Return a random valid sample instead
+            valid_idx = np.random.randint(0, len(self.data))
+            if valid_idx == idx:  # Avoid infinite recursion
+                valid_idx = (idx + 1) % len(self.data)
+            return self.__getitem__(valid_idx)
         
-        # Load image
-        image_path = row['image_path']
-        image = cv2.imread(image_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Create masked image using polygon
+        masked_image = self.create_masked_image(image, polygon_points)
+        
+        # Crop to bounding box of polygon
+        cropped_image = self.crop_to_polygon_bbox(masked_image, polygon_points)
         
         # Extract rotation matrix from CSV
         R = np.array([
@@ -36,41 +69,44 @@ class PoseDataset(Dataset):
         # Convert rotation matrix to quaternion
         quaternion = rotation_matrix_to_quaternion(R)
         
-        # Crop image to mask region
-        image = self.crop_to_mask(image)
-        
         if self.transform:
-            image = self.transform(image)
+            cropped_image = self.transform(cropped_image)
             
-        return image, quaternion
+        return cropped_image, quaternion
     
-    def crop_to_mask(self, image):
-        # Create binary mask from non-black pixels
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        mask = gray > 0
+    def create_masked_image(self, image, polygon_points):
+        """
+        Create masked image: keep RGB inside polygon, black outside
+        """
+        # Create binary mask from polygon
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask, [polygon_points], 255)
         
-        # Find bounding box of mask
-        coords = np.column_stack(np.where(mask))
-        if len(coords) == 0:
-            # If no mask found, return center crop
-            h, w = image.shape[:2]
-            size = min(h, w) // 2
-            center_y, center_x = h // 2, w // 2
-            y1 = max(0, center_y - size)
-            y2 = min(h, center_y + size)
-            x1 = max(0, center_x - size)
-            x2 = min(w, center_x + size)
-            return image[y1:y2, x1:x2]
+        # Apply mask: keep original RGB inside polygon, black outside
+        masked_image = image.copy()
+        masked_image[mask == 0] = [0, 0, 0]  # Set background to black
         
-        y_min, x_min = coords.min(axis=0)
-        y_max, x_max = coords.max(axis=0)
+        return masked_image
+    
+    def crop_to_polygon_bbox(self, image, polygon_points):
+        """
+        Crop image to bounding box of polygon with small padding
+        """
+        # Get bounding box of polygon
+        x_coords = polygon_points[:, 0]
+        y_coords = polygon_points[:, 1]
+        
+        x_min, x_max = np.min(x_coords), np.max(x_coords)
+        y_min, y_max = np.min(y_coords), np.max(y_coords)
         
         # Add small padding
-        padding = 10
-        y_min = max(0, y_min - padding)
+        padding = 20
+        h, w = image.shape[:2]
+        
         x_min = max(0, x_min - padding)
-        y_max = min(image.shape[0], y_max + padding)
-        x_max = min(image.shape[1], x_max + padding)
+        y_min = max(0, y_min - padding)
+        x_max = min(w, x_max + padding)
+        y_max = min(h, y_max + padding)
         
         # Crop image
         cropped = image[y_min:y_max, x_min:x_max]
@@ -113,7 +149,7 @@ class PoseEstimationNet(nn.Module):
         super(PoseEstimationNet, self).__init__()
         
         # Use ResNet18 as backbone
-        self.backbone = models.resnet18(pretrained=True)
+        self.backbone = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         
         # Remove final classification layer
         self.backbone.fc = nn.Identity()
@@ -144,7 +180,7 @@ def quaternion_geodesic_loss(q_pred, q_gt):
     q_pred = q_pred / torch.norm(q_pred, dim=1, keepdim=True)
     q_gt = q_gt / torch.norm(q_gt, dim=1, keepdim=True)
     
-    # Compute dot product
+    # Compute dot product (handle quaternion double cover: q and -q represent same rotation)
     dot_product = torch.abs(torch.sum(q_pred * q_gt, dim=1))
     
     # Clamp to avoid numerical issues
@@ -163,7 +199,7 @@ def train_model(csv_path, model_save_path, num_epochs=100, batch_size=16, lr=1e-
     # Data transforms
     transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((224, 224)),  # ResNet input size
+        transforms.Resize((256, 256)),  # Larger input for better GPU utilization
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -176,14 +212,19 @@ def train_model(csv_path, model_save_path, num_epochs=100, batch_size=16, lr=1e-
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
+                             num_workers=4, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, 
+                           num_workers=4, pin_memory=True, persistent_workers=True)
+    
+    print(f"Training samples: {len(train_dataset)}")
+    print(f"Validation samples: {len(val_dataset)}")
     
     # Create model
     model = PoseEstimationNet().to(device)
     
     # Loss and optimizer
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
     
     # Training loop
@@ -229,7 +270,7 @@ def train_model(csv_path, model_save_path, num_epochs=100, batch_size=16, lr=1e-
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
         
-        print(f'Epoch {epoch+1}/{num_epochs}: Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
+        print(f'Epoch {epoch+1}/{num_epochs}: Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, LR: {optimizer.param_groups[0]["lr"]:.2e}')
         
         # Learning rate scheduling
         scheduler.step(val_loss)
@@ -245,6 +286,11 @@ def train_model(csv_path, model_save_path, num_epochs=100, batch_size=16, lr=1e-
                 'val_loss': val_loss,
             }, model_save_path)
             print(f'Saved best model with validation loss: {val_loss:.6f}')
+        
+        # Early stopping if learning rate becomes too small
+        if optimizer.param_groups[0]['lr'] < 1e-7:
+            print("Learning rate too small, stopping training")
+            break
     
     print(f'Training completed. Best validation loss: {best_val_loss:.6f}')
 
