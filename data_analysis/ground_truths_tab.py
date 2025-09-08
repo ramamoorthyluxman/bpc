@@ -11,6 +11,7 @@ from pxl_2_point import create_pointcloud_with_colors
 import open3d as o3d
 import json
 from PIL import Image, ImageTk, ImageDraw, ImageFont
+from collections import Counter
 
 
 class GroundTruthsTab:
@@ -312,9 +313,95 @@ class GroundTruthsTab:
                         foreground="green"
                     )
                 
+                # Update training summary
+                self.update_training_summary()
+                
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load CSV file:\n{str(e)}")
             self.status_label.config(text="✗ Error loading CSV", foreground="red")
+    
+    def analyze_csv_data(self):
+        """Analyze CSV data to extract class information"""
+        try:
+            if not self.csv_tree.get_children():
+                return None
+            
+            headers = [col for col in self.csv_tree['columns']]
+            
+            # Find object_id column
+            object_id_col = None
+            for i, header in enumerate(headers):
+                if 'object_id' in header.lower():
+                    object_id_col = i
+                    break
+            
+            if object_id_col is None:
+                return {
+                    'error': 'No object_id column found in CSV',
+                    'total_images': len(self.csv_tree.get_children()),
+                    'unique_classes': [],
+                    'class_counts': {}
+                }
+            
+            # Collect all object_ids
+            object_ids = []
+            total_images = 0
+            
+            for item in self.csv_tree.get_children():
+                values = self.csv_tree.item(item, 'values')
+                if object_id_col < len(values) and values[object_id_col]:
+                    object_ids.append(values[object_id_col])
+                total_images += 1
+            
+            # Count occurrences
+            class_counts = Counter(object_ids)
+            unique_classes = list(class_counts.keys())
+            
+            return {
+                'total_images': total_images,
+                'unique_classes': unique_classes,
+                'num_unique_classes': len(unique_classes),
+                'class_counts': dict(class_counts),
+                'error': None
+            }
+            
+        except Exception as e:
+            return {
+                'error': f'Error analyzing CSV data: {str(e)}',
+                'total_images': 0,
+                'unique_classes': [],
+                'class_counts': {}
+            }
+    
+    def update_training_summary(self):
+        """Update the training summary text box"""
+        analysis = self.analyze_csv_data()
+        
+        if analysis is None:
+            summary_text = "No CSV data loaded"
+        elif analysis['error']:
+            summary_text = f"Error: {analysis['error']}\nTotal rows: {analysis['total_images']}"
+        else:
+            summary_text = f"Dataset Summary:\n"
+            summary_text += f"═══════════════════\n"
+            summary_text += f"Total Images: {analysis['total_images']}\n"
+            summary_text += f"Unique Classes: {analysis['num_unique_classes']}\n\n"
+            
+            summary_text += f"Class Distribution:\n"
+            summary_text += f"──────────────────\n"
+            
+            if analysis['unique_classes']:
+                # Sort by count (descending)
+                sorted_classes = sorted(analysis['class_counts'].items(), key=lambda x: x[1], reverse=True)
+                for class_name, count in sorted_classes:
+                    percentage = (count / analysis['total_images']) * 100
+                    summary_text += f"{class_name}: {count} images ({percentage:.1f}%)\n"
+            else:
+                summary_text += "No classes found\n"
+        
+        # Update the text widget
+        self.training_summary.delete(1.0, tk.END)
+        self.training_summary.insert(tk.END, summary_text)
     
     def setup_display_area(self):
         """Setup the image and 3D point cloud display area"""
@@ -376,9 +463,13 @@ class GroundTruthsTab:
         self.image_canvas.bind("<Button-1>", self.start_pan)
         self.image_canvas.bind("<B1-Motion>", self.pan_image)
         
-        # Right side - 3D Point Cloud with Open3D button
-        pcl_frame = ttk.LabelFrame(display_frame, text="3D Point Cloud")
-        pcl_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        # Right side - Container for 3D Point Cloud and Training sections
+        right_container = ttk.Frame(display_frame)
+        right_container.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        
+        # 3D Point Cloud section
+        pcl_frame = ttk.LabelFrame(right_container, text="3D Point Cloud")
+        pcl_frame.pack(fill='both', expand=True, pady=(0, 5))
         
         # Button to open Open3D visualization
         self.open3d_button = ttk.Button(
@@ -395,6 +486,68 @@ class GroundTruthsTab:
             foreground="gray"
         )
         self.pcl_status_label.pack(pady=10)
+        
+        # Training section
+        training_frame = ttk.LabelFrame(right_container, text="Training")
+        training_frame.pack(fill='both', expand=True, pady=(5, 0))
+        
+        # Button frame for training
+        training_button_frame = ttk.Frame(training_frame)
+        training_button_frame.pack(pady=10)
+        
+        # Train Mask R-CNN button
+        self.train_maskrcnn_button = ttk.Button(
+            training_button_frame,
+            text="Train Mask R-CNN",
+            command=self.train_maskrcnn_clicked
+        )
+        self.train_maskrcnn_button.pack()
+        
+        # Training summary text area with scrollbar
+        summary_frame = ttk.Frame(training_frame)
+        summary_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Text widget with scrollbar
+        self.training_summary = tk.Text(
+            summary_frame,
+            wrap=tk.WORD,
+            height=12,
+            width=40,
+            font=("Consolas", 9)
+        )
+        
+        training_scroll = ttk.Scrollbar(summary_frame, orient='vertical', command=self.training_summary.yview)
+        self.training_summary.configure(yscrollcommand=training_scroll.set)
+        
+        # Grid layout for text and scrollbar
+        self.training_summary.grid(row=0, column=0, sticky='nsew')
+        training_scroll.grid(row=0, column=1, sticky='ns')
+        
+        # Configure grid weights
+        summary_frame.grid_rowconfigure(0, weight=1)
+        summary_frame.grid_columnconfigure(0, weight=1)
+        
+        # Initialize training summary
+        self.training_summary.insert(tk.END, "Load CSV data to see training summary")
+    
+    def train_maskrcnn_clicked(self):
+        """Handle Train Mask R-CNN button click"""
+        # Placeholder for training functionality
+        if not self.current_csv_path:
+            messagebox.showwarning("No Data", "Please load CSV data first")
+            return
+        
+        analysis = self.analyze_csv_data()
+        if analysis and not analysis['error']:
+            message = f"Training Mask R-CNN with:\n"
+            message += f"• {analysis['total_images']} images\n"
+            message += f"• {analysis['num_unique_classes']} classes\n"
+            message += f"• Classes: {', '.join(analysis['unique_classes'])}\n\n"
+            message += f"Training functionality to be implemented..."
+            
+            messagebox.showinfo("Training", message)
+        else:
+            messagebox.showerror("Error", "Cannot analyze dataset for training")
     
     def extract_mask_data_from_row(self, row_values):
         """Extract mask data from CSV row"""

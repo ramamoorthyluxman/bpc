@@ -58,6 +58,8 @@ def apply_transform(points, R, t):
     """Apply rigid transformation to points"""
     return (R @ points.T).T + t
 
+
+
 # Example usage and test
 if __name__ == "__main__":
     # Generate test data

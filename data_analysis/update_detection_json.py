@@ -183,69 +183,96 @@ def transform_pose_to_world_backup(R_camera, T_camera, csv_row):
     return R_world, T_world
 
 
-def add_3d_centers_to_json(cam_row: None,
-                          json_data: Dict[str, Any], 
-                          depth_path: str, 
-                          search_radius: int = 5) -> Dict[str, Any]:
-    """
-    Add 3D center locations to objects in JSON data.
-    
-    Args:
-        json_data: Dictionary containing the JSON data with object detections
-        depth_path: Path to corresponding depth image
-        camera_params_path: Path to camera parameters JSON file
-        search_radius: Search radius for finding valid neighboring pixels if center is invalid
-        
-    Returns:
+def add_3d_centers_to_json(cam_row: None,                           
+                           json_data: Dict[str, Any],                            
+                           depth_path: str,                            
+                           search_radius: int = 5) -> Dict[str, Any]:     
+    """     
+    Add 3D center locations to objects in JSON data using oriented bounding box for X,Y coordinates.          
+    Args:         
+        json_data: Dictionary containing the JSON data with object detections         
+        depth_path: Path to corresponding depth image         
+        camera_params_path: Path to camera parameters JSON file         
+        search_radius: Search radius for finding valid neighboring pixels if center is invalid              
+    Returns:         
         Updated JSON data with 'object_center_3d_loc' field added to each object
-    """
-    
-    
-    
-    # Handle nested JSON structure
-    if 'results' in json_data:
-        masks_data = json_data['results'][0]['masks']
-    elif 'masks' in json_data:
-        masks_data = json_data['masks']
-    else:
-        raise ValueError("Could not find masks data in JSON. Expected 'results' or 'masks' key.")
-    
-    
-    # Process each object
-    for i, obj in enumerate(masks_data):
-        label = obj['label']
-        geometric_center = obj['geometric_center']
-        u, v = geometric_center[0], geometric_center[1]  # u=column, v=row
         
-
-        # Extract K matrix values and reshape to 3x3
-        k_matrix = np.array([float(cam_row[f'k{i//3+1}{i%3+1}']) for i in range(9)]).reshape(3, 3)
-
-        # Extract depth scale
-        depth_scale = float(cam_row['depth_scale'])
-
-        # Try to find valid 3D point
-        point_3d, used_pixel = find_valid_neighbor_pixel(
-            int(u), int(v), depth_path, k_matrix, depth_scale, search_radius
+    Note: Requires OpenCV (import cv2) for oriented bounding box computation     
+    """                    
+    
+    # Handle nested JSON structure     
+    if 'results' in json_data:         
+        masks_data = json_data['results'][0]['masks']     
+    elif 'masks' in json_data:         
+        masks_data = json_data['masks']     
+    else:         
+        raise ValueError("Could not find masks data in JSON. Expected 'results' or 'masks' key.")               
+    
+    # Process each object     
+    for i, obj in enumerate(masks_data):         
+        label = obj['label']         
+        geometric_center = obj['geometric_center']         
+        mask_coordinates = obj.get('points', [])  # Mask coordinates are in 'points' field
+        
+        # Compute oriented bounding box from mask coordinates
+        if mask_coordinates:
+            # Convert mask coordinates to numpy array format for OpenCV
+            mask_points = np.array(mask_coordinates, dtype=np.float32)
+            
+            # Compute oriented bounding box using OpenCV
+            rect = cv2.minAreaRect(mask_points)
+            # rect contains: ((center_x, center_y), (width, height), angle)
+            
+            # Extract oriented bounding box center
+            bbox_center_u = int(rect[0][0])  # center_x
+            bbox_center_v = int(rect[0][1])  # center_y
+        else:
+            # Fallback to geometric center if no mask coordinates available
+            bbox_center_u, bbox_center_v = geometric_center[0], geometric_center[1]
+            print(f"  ⚠️ No mask coordinates found for object {i}, using geometric center")
+        
+        # Use geometric center for depth (Z value)
+        depth_u, depth_v = geometric_center[0], geometric_center[1]  # u=column, v=row                   
+        
+        # Extract K matrix values and reshape to 3x3         
+        k_matrix = np.array([float(cam_row[f'k{i//3+1}{i%3+1}']) for i in range(9)]).reshape(3, 3)          
+        
+        # Extract depth scale         
+        depth_scale = float(cam_row['depth_scale'])          
+        
+        # Get depth value from geometric center
+        depth_point_3d, used_pixel = find_valid_neighbor_pixel(             
+            int(depth_u), int(depth_v), depth_path, k_matrix, depth_scale, search_radius         
         )
         
+        # Get X, Y coordinates from bounding box center
+        bbox_point_3d, bbox_used_pixel = find_valid_neighbor_pixel(             
+            int(bbox_center_u), int(bbox_center_v), depth_path, k_matrix, depth_scale, search_radius         
+        )
         
-        if point_3d is not None:
-            # Convert to regular Python list for JSON serialization
-            center_3d = [float(point_3d[0]), float(point_3d[1]), float(point_3d[2])]
-            obj['object_center_3d_local'] = center_3d
-            obj['object_center_3d_world'] = transform_3d_point(center_3d, cam_row)
+        if depth_point_3d is not None and bbox_point_3d is not None:
+            # Create hybrid 3D point: X,Y from bounding box center, Z from geometric center
+            hybrid_point_3d = [float(bbox_point_3d[0]), float(bbox_point_3d[1]), float(depth_point_3d[2])]
             
+            # Store local coordinates
+            obj['object_center_3d_local'] = hybrid_point_3d
             
-        else:
-            obj['object_center_3d_local'] = None
-            obj['object_center_3d_world'] = None
-            print(f"  ❌ No valid depth found")
+            # Transform to world coordinates
+            obj['object_center_3d_world'] = transform_3d_point(hybrid_point_3d, cam_row)
+            
+            print(f"  ✅ Hybrid 3D point computed: oriented_bbox_center=({bbox_center_u}, {bbox_center_v}), depth_center=({depth_u}, {depth_v})")
+                                   
+        else:             
+            obj['object_center_3d_local'] = None             
+            obj['object_center_3d_world'] = None             
+            print(f"  ❌ No valid depth found for object {i}")          
     
-    # Print summary
-    valid_count = sum(1 for obj in masks_data if obj.get('object_center_3d_loc') is not None)
+    # Print summary     
+    valid_count = sum(1 for obj in masks_data if obj.get('object_center_3d_local') is not None)          
+    print(f"Successfully processed {valid_count}/{len(masks_data)} objects with valid 3D centers")
     
     return json_data
+
 
 # Example usage:
 # updated_json = add_3d_centers_to_json(your_json_data, "depth.png", "camera.json")

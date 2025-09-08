@@ -8,11 +8,14 @@ photoneo: /home/ram/bpc_ws/bpc/ipd/camera_photoneo.json
 # metadata path
 meta_data_folder: /home/ram/bpc_ws/bpc/test_pipeline/metadata
 
+# Mesh path
+mesh_dir: /home/ram/ipd_data/models
+
 
 # MaskRCNN
 maskrcnn_model_path: "/home/ram/ipd_data/model_epoch_999.pth"
 maskrcnn_output_path: "/home/ram/bpc_ws/data_analysis/maskRCNN/results"
-maskrcnn_confidence_threshold: 0.8
+maskrcnn_confidence_threshold: 0.95
 maskrcnn_category_txt_path: "/home/ram/bpc_ws/bpc/maskRCNN/categories.txt"
 maskrcnn_visualization_and_save: true
 

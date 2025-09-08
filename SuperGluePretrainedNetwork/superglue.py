@@ -14,14 +14,14 @@ class SuperGlueMatcher:
         
         config = {
             'superpoint': {
-                'nms_radius': 8,
-                'keypoint_threshold': 0.005,
+                'nms_radius': 10,
+                'keypoint_threshold': 0.01,
                 'max_keypoints': 1024
             },
             'superglue': {
                 'weights': 'indoor',
                 'sinkhorn_iterations': 100,
-                'match_threshold': 0.4,
+                'match_threshold': 0.5,
             }
         }
         

@@ -798,7 +798,7 @@ class TestResultsTab:
             messagebox.showerror("Error", "No photoneo camera data found in selected scene. Cannot create world coordinate point cloud.")
             return
 
-        start_time = time.time()
+        start_p_time = time.time()
         scene_info = process_scene_data(matching_rows)
         start_time = time.time()
         scene_info.mask_objects()
@@ -812,14 +812,14 @@ class TestResultsTab:
         scene_info.do_feature_matchings()
         end = time.time()
         print(f"Feature matching took: {end - start_time:.6f} seconds")
-        start_time = time.time()
-        scene_info.compute_6d_poses()
-        end = time.time()
-        print(f"6D pose computation took: {end - start_time:.6f} seconds")
+        # start_time = time.time()
+        # scene_info.compute_6d_poses()
+        # end = time.time()
+        # print(f"6D pose computation took: {end - start_time:.6f} seconds")
 
 
         end_time = time.time()
-        time_taken = end_time - start_time
+        time_taken = end_time - start_p_time
 
         # Create mapping from row index to cluster number
         row_to_cluster = {row_idx: cluster_num 
@@ -957,11 +957,12 @@ class TestResultsTab:
                             continue
                     
                     # Update status
-                    num_poses = len(self.detected_poses_transformation_matrix) 
-                    self.pcl_status_label.config(
-                        text=f"Detection point cloud ready ({len(self.current_point_cloud.points)} points, {num_poses} object poses)\nClick 'Open 3D Viewer' to visualize",
-                        foreground="green"
-                    )
+                    if self.detected_poses_transformation_matrix:
+                        num_poses = len(self.detected_poses_transformation_matrix) 
+                        self.pcl_status_label.config(
+                            text=f"Detection point cloud ready ({len(self.current_point_cloud.points)} points, {num_poses} object poses)\nClick 'Open 3D Viewer' to visualize",
+                            foreground="green"
+                        )
                     
                     # print(f"Detection point cloud created with {len(self.current_point_cloud.points)} points and {num_poses} pose markers")
                     
@@ -1018,20 +1019,21 @@ class TestResultsTab:
             # Add coordinate frames if they exist (from detection results)
         
             # print("Adding detection coordinate frames to 3D viewer:")
-            for i, frame in enumerate(self.detected_poses_transformation_matrix):
-                coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
-                # print("Test transformation matrix: ", frame)
-                coord_frame.transform(frame)
-                geometries.append(coord_frame)
-                center = np.asarray(coord_frame.get_center())
-                # print(f"Frame {i} center: {center}")      
-                # Add red sphere marker at original pose location
-                pose_position = frame[:3, 3]
-                marker_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=axis_size*0.01)
-                marker_sphere.paint_uniform_color([1.0, 0.0, 0.0])  # Red marker
-                marker_sphere.translate(pose_position)
-                geometries.append(marker_sphere)          
-            # print(f"Added {len(self.detected_poses_transformation_matrix)} coordinate frames")
+            if self.detected_poses_transformation_matrix:
+                for i, frame in enumerate(self.detected_poses_transformation_matrix):
+                    coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_size)
+                    # print("Test transformation matrix: ", frame)
+                    coord_frame.transform(frame)
+                    geometries.append(coord_frame)
+                    center = np.asarray(coord_frame.get_center())
+                    # print(f"Frame {i} center: {center}")      
+                    # Add red sphere marker at original pose location
+                    pose_position = frame[:3, 3]
+                    marker_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=axis_size*0.01)
+                    marker_sphere.paint_uniform_color([1.0, 0.0, 0.0])  # Red marker
+                    marker_sphere.translate(pose_position)
+                    geometries.append(marker_sphere)          
+                # print(f"Added {len(self.detected_poses_transformation_matrix)} coordinate frames")
             
             
             # print(f"Total geometries to display: {len(geometries)}")
