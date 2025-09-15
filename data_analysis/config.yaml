@@ -1,9 +1,9 @@
 #camera parameters file paths
 
-cam1: /home/ram/bpc_ws/bpc/ipd/camera_cam1.json
-cam2: /home/ram/bpc_ws/bpc/ipd/camera_cam2.json
-cam3: /home/ram/bpc_ws/bpc/ipd/camera_cam3.json
-photoneo: /home/ram/bpc_ws/bpc/ipd/camera_photoneo.json
+cam1: /home/ram/ipd_data/camera_cam1.json
+cam2: /home/ram/ipd_data/camera_cam2.json
+cam3: /home/ram/ipd_data/camera_cam3.json
+photoneo: /home/ram/ipd_data/camera_photoneo.json
 
 # metadata path
 meta_data_folder: /home/ram/bpc_ws/bpc/data_analysis/meta_data
@@ -16,28 +16,16 @@ mesh_dir: /home/ram/ipd_data/models
 maskrcnn_model_path: "/home/ram/ipd_data/model_epoch_999.pth"
 maskrcnn_output_path: "/home/ram/bpc_ws/data_analysis/maskRCNN/results"
 maskrcnn_confidence_threshold: 0.95
-maskrcnn_category_txt_path: "/home/ram/bpc_ws/bpc/maskRCNN/categories.txt"
+maskrcnn_category_txt_path: "/home/ram/bpc_ws/bpc/data_analysis/maskRCNN/categories.txt"
 maskrcnn_visualization_and_save: true
 
 # Build 3D PCL
 save_pcl: false
 
-# ROI Extraction
-roi_extraction_output_path: "/home/ram/bpc_ws/bpc/roi_extraction/output"
-save_rois: true
-
 ## Register
 
 register_reference_models_path: "/home/ram/bpc_ws/bpc/ipd/models"
-register_output_path: "/home/ram/bpc_ws/bpc/pointcloud_registration/registration_results"
-registration_visualization_and_save: true
 
-# Parallel processing settings
-parallel_processing:
-  max_workers: null  # Auto-detect, or set specific number
-  use_gpu: true
-  gpu_batch_size: 64
-  memory_efficient: true
 
 # Reference dataset CSV
 ref_csv_path: /home/ram/bpc_ws/bpc/data_analysis/filtered_dataset.csv

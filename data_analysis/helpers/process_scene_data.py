@@ -15,7 +15,6 @@ import torch
 from functools import partial
 import threading
 
-import funcs
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pcl_builder')))
 from create_pointcloud_gpu_accelerated import build_pcl
@@ -23,11 +22,9 @@ from create_pointcloud_gpu_accelerated import build_pcl
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'SuperGluePretrainedNetwork')))
 from superglue import SuperGlueMatcher
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.', 'maskRCNN')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'maskRCNN')))
 from inference import infer
 
-sys.path.append('/home/ram/bpc_ws/bpc/pose_estimation_nn')
-from estimate_pose import PoseEstimator
 
 from update_detection_json import add_3d_centers_to_json, find_valid_neighbor_pixel, transform_3d_point,  transform_pose_to_world
 from pose_estimator import compute_rigid_transform
@@ -449,136 +446,11 @@ class process_scene_data:
         
         print(f"Detection consolidation completed in {time.time() - start_time:.2f} seconds")
 
-    def do_feature_matchings_backup(self):
-        """Fast feature matching with pooled matchers and limited threading"""
-        print("Starting fast feature matching with matcher pooling...")
-        start_time = time.time()
-        
-        # Initialize matcher pool once
-        initialize_matcher_pool(pool_size=3)
-        
-        # Prepare all detection tasks
-        detection_tasks = []
-        for i, consolidated_detection in enumerate(self.consolidated_detections):
-            self.display_results["nb_maskrcnn_detections"] = consolidated_detection[0]
-            
-            for j, detection_idx in enumerate(consolidated_detection):
-                detection = self.detections[detection_idx]
-                detection_info = (detection, i, j)
-                detection_tasks.append((detection_info, self.scene_data, self.ref_dataset_grouped, self.meta_data_path))
-                
-                object_id = int(detection[0].split('_')[1])
-                self.display_results["detected_objects"].append(object_id)
-        
-        print(f"Processing {len(detection_tasks)} feature matching tasks...")
-        
-        # Use ThreadPoolExecutor with limited workers to share matchers
-        processed_consolidated = set()
-        total_tasks = len(detection_tasks)
-        completed_tasks = 0
-        
-        with ThreadPoolExecutor(max_workers=3) as executor:  # Match number of matchers
-            # Submit all tasks
-            future_to_task = {executor.submit(process_single_feature_matching_fast, task): i for i, task in enumerate(detection_tasks)}
-            
-            # Process results with timeout
-            for future in as_completed(future_to_task, timeout=300):  # 5 min timeout
-                try:
-                    result = future.result(timeout=30)  # 30s per task timeout
-                    completed_tasks += 1
-                    
-                    if result[0] is not None:  # Valid match found
-                        detection_result = result[0]
-                        consolidated_idx = result[1]
-                        
-                        # Only add first successful match per consolidated detection
-                        if consolidated_idx not in processed_consolidated:
-                            self.detections_homographies.append(detection_result)
-                            self.display_results["feature_matching_images"].append(detection_result['viz_image'])
-                            processed_consolidated.add(consolidated_idx)
-                    
-                    # Progress update
-                    if completed_tasks % 10 == 0:
-                        print(f"Completed {completed_tasks}/{total_tasks} feature matching tasks...")
-                    
-                except Exception as e:
-                    print(f"Error in feature matching: {e}")
-                    completed_tasks += 1
-                    continue
-        
-        # Add no-match results for unprocessed consolidated detections
-        for i, consolidated_detection in enumerate(self.consolidated_detections):
-            if i not in processed_consolidated:
-                detection = self.detections[consolidated_detection[0]]
-                no_match_result = {
-                    'scene_cam_row_num': detection[4],
-                    'camera_id': detection[1],
-                    'mask_idx': detection[3],
-                    'object_idx': int(detection[0].split('_')[1]),
-                    'ref_row': None,
-                    'h_mat': None,
-                    'confidence': None,
-                    'num_matches': 0,
-                    'matched_points0': None,
-                    'matched_points1': None,
-                    'matched_points0_3d': None,
-                    'matched_points1_3d': None
-                }
-                self.detections_homographies.append(no_match_result)
-        
-        print(f"Feature matching completed in {time.time() - start_time:.2f} seconds")
+    
+
 
 
     def do_feature_matchings(self):
-        for i in range(0,len(self.consolidated_detections)):
-            # print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
-            
-            self.display_results["nb_maskrcnn_detections"] = self.consolidated_detections[i][0]
-
-            for j in range(0, len(self.consolidated_detections[i])):
-
-                detection = self.detections[self.consolidated_detections[i][j]]
-                row_num = detection[4]
-                mask_idx = detection[3]
-                camera_id = detection[1]
-                object_id = int(detection[0].split('_')[1])
-                mask = self.scene_data[row_num]["detection_json"]["results"][0]["masks"][mask_idx]["points"]
-                image_id = self.scene_data[row_num]["image_index"]
-                scene_id = self.scene_data[row_num]["scene_id"]
-
-                result = {'scene_cam_row_num': row_num,
-                            'camera_id': camera_id,
-                            'mask_idx': mask_idx,
-                            'object_idx': object_id,
-                            'ref_row': None,
-                            'h_mat': None,
-                            'confidence': 0.005,
-                            'num_matches': 0,
-                            'matched_points0': None,
-                            'matched_points1': None,
-                            'matched_points0_3d' : None,
-                            'matched_points1_3d' : None}
-                
-
-                mesh_path = self.mesh_dir + '/obj_' + str(f"{object_id:06d}") + '.ply'
-                image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
-                init_tvec = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
-                K = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3)
-                polygon_mask_coordinates = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
-
-                
-                funcs.estimate_pose(image=image, 
-                                    polygon_coords=polygon_mask_coordinates, 
-                                    mesh_path=mesh_path, 
-                                    cam_K=K,
-                                    init_tvec=np.array(init_tvec, dtype=np.float32),
-                                    save_path=os.path.join(self.meta_data_path, "pose_estimation"))
-
-                return result
-
-
-
-    def do_feature_matchings_copy(self):
         
         for i in range(0,len(self.consolidated_detections)):
             # print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
@@ -666,84 +538,7 @@ class process_scene_data:
                             break
                         
                     
-                if j == len(self.consolidated_detections[i])-1 and len(self.detections_homographies) < i+1:
-                    result = {'scene_cam_row_num': row_num,
-                            'camera_id': camera_id,
-                            'mask_idx': mask_idx,
-                            'object_idx': object_id,
-                            'ref_row': ref_row,
-                            'h_mat': h_mat,
-                            'confidence': confidence,
-                            'num_matches': 0,
-                            'matched_points0': matched_points0,
-                            'matched_points1': matched_points1,
-                            'matched_points0_3d' : None,
-                            'matched_points1_3d' : None}
-
-
-                    self.detections_homographies.append(result)
-                    mesh_path = self.mesh_dir + '/obj_' + str(f"{object_id:06d}") + '.ply'
-                    image_size = (int(self.scene_data[row_num]['image_width']), int(self.scene_data[row_num]['image_height']))  
-                    polygon_mask_coordinates = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
-                    image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
-
-                    mask_image = funcs.create_polygon_mask(image, polygon_mask_coordinates)
-
-                    
-
-
-                    refiner = PoseRefiner(
-                        mesh_path=mesh_path,
-                        K = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3),
-                        image_size=image_size
-                    )
-
-                    init_tvec = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
-                    init_rvec = np.array([0.0, 0.0, 0.0], dtype=np.float64)
-                    
-
-                    polygon_mask = refiner.create_polygon_mask(polygon_mask_coordinates)
-
-                    output = refiner.refine_pose(target_mask= polygon_mask,
-                                                init_rvec=init_rvec,
-                                                init_tvec=init_tvec)
-                    
-                    image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
-                    
-                    metrics = refiner.visualize_results(image, polygon_mask, output['rvec'], output['tvec'])
-                    print(f"✓ Final IoU: {metrics['iou']:.4f}")
-
-                    print("rvec: ", output['rvec'] )
-                    print("tvec: ", output['tvec'] )
-
-                    
-                    result['rmse'] = 0.5
-                    
-                    
-                    
-                    R_test_cam = cv2.Rodrigues(output['rvec'])[0]
-                    # T_test_cam = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
-                    T_test_cam = output['tvec']
-
-                    R_test_world, T_test_world = transform_pose_to_world(R_test_cam, T_test_cam, self.scene_data[result['scene_cam_row_num']])
-
-                    result['R'] = R_test_world
-                    result['T'] = T_test_world
-
-                    camera_id = result['camera_id']
-                    object_id = result['object_idx']
-
-                    summary_result = {
-                                        "camera ID": camera_id,
-                                        "object ID": object_id,
-                                        "R_test_cam": R_test_cam,
-                                        "T_test_cam": T_test_cam,
-                                        "R_test_world": result['R'],
-                                        "T_test_world": result['T'],
-                                        "rmse": result['rmse']
-                                    }
-
-                    self.display_results["results_summary"].append(summary_result)
+                
 
 
     def compute_6d_poses(self, detection_result):

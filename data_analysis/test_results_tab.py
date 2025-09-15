@@ -8,12 +8,14 @@ import numpy as np
 import json
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 import open3d as o3d
-from read_test_dataset import read_test_dataset
-from pxl_2_point import create_pointcloud_with_colors
 import sys
-from process_scene_data import process_scene_data
 from collections import defaultdict, Counter
 import time
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.', 'helpers')))
+from read_test_dataset import read_test_dataset
+from pxl_2_point import create_pointcloud_with_colors
+from process_scene_data import process_scene_data
 
 import gc
 

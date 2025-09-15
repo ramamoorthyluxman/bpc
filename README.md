@@ -1,246 +1,215 @@
-# Perception Challenge For Bin-Picking
+# Test Results Visualizer
 
-[![build_packages](https://github.com/opencv/bpc/actions/workflows/build.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/build.yaml)
-[![style](https://github.com/opencv/bpc/actions/workflows/style.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/style.yaml)
-[![test validation](https://github.com/opencv/bpc/actions/workflows/test.yaml/badge.svg?branch=main)](https://github.com/opencv/bpc/actions/workflows/test.yaml)
+A comprehensive GUI application for visualizing and analyzing computer vision datasets, ground truth annotations, and object detection test results with 6D pose estimation capabilities.
 
-Challenge [official website](https://bpc.opencv.org/).
+## Features
 
-![](../media/bpc.gif)
+### Ground Truths Visualization Tab
+- **Dataset Processing**: Read and process multi-camera RGB-D datasets
+- **3D Models Integration**: Load and associate 3D object models with scene data
+- **Ground Truth Visualization**: Display RGB images with mask overlays and bounding boxes
+- **3D Point Cloud Generation**: Create colored point clouds from RGB-D data
+- **Pose Visualization**: View ground truth 6D object poses in 3D space
+- **Training Data Analysis**: Analyze class distributions and dataset statistics
+- **Mask R-CNN Training Interface**: Prepare data for model training
 
-## Key Steps for Participation
-1. [Set up the local environment](#settingup)
-2. [Download training and validation/testing data](#download_train_data)
-3. Prepare submission:
-    1. [Check the baseline solution for input/output examples](#baseline_solution)
-    2. [Build your custom image with your solution and test it locally](#build_custom_bpc_pe)
-4. [Submit your solution](#submission)
+### Test Results Visualization Tab
+- **Test Dataset Processing**: Process test scenes for object detection evaluation
+- **Object Detection Pipeline**: Run Mask R-CNN inference on test images
+- **Detection Consolidation**: Merge multi-view detections using clustering algorithms
+- **Feature Matching**: Perform SuperGlue-based feature matching between views
+- **6D Pose Estimation**: Compute object poses in camera and world coordinates
+- **Multi-View Navigation**: Browse through detection results across different camera views
+- **3D Results Visualization**: Display detected objects and estimated poses in 3D space
 
-## Overview
+## Requirements
 
-This repository contains the sample submission code, ROS interfaces, and evaluation service for the Perception Challenge For Bin-Picking. The reason we openly share the tester code here is to give participants a chance to validate their submissions before submitting.
+### Python Dependencies
+```
+tkinter
+opencv-python (cv2)
+numpy
+open3d
+PIL (Pillow)
+json
+csv
+threading
+collections
+```
 
-- **Estimator:**
-  The estimator code represents the sample submission. Participants need to implement their solution by editing the placeholder code in the function `get_pose_estimates` in `ibpc_pose_estimator.py`. The tester will invoke the participant's solution via a ROS 2 service call over the `/get_pose_estimates` endpoint.
+### Hardware Requirements
+- GPU support recommended for point cloud processing and inference
+- Sufficient RAM for large point cloud visualization
+- OpenGL support for 3D visualization
 
-- **Tester:**
-  The tester code serves as the evaluation service. A copy of this code will be running on the evaluation server and is provided for reference only. It loads the test dataset, prepares image inputs, invokes the estimator service repeatedly, collects the results, and submits for further evaluation.
+## Installation
 
-- **ROS Interface:**
-  The API for the challenge is a ROS service, [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv), over `/get_pose_estimates`. Participants implement the service callback on a dedicated ROS node (commonly referred to as the PoseEstimatorNode) which processes the input data (images and metadata) and returns pose estimation results.
-
-In addition, we provide the [ibpc_py tool](https://github.com/opencv/bpc/tree/main/ibpc_py) which facilitates downloading the challenge data and performing various related tasks. You can find the installation guide and examples of its usage below. 
-
-## Design
-
-### ROS-based Framework
-
-The core architecture of the challenge is based on ROS 2. Participants are required to respond to a ROS 2 Service request with pose estimation results. The key elements of the architecture are:
-
-- **Service API:**
-  The ROS service interface (defined in the [GetPoseEstimates](ibpc_interfaces/srv/GetPoseEstimates.srv) file) acts as the API for the challenge.
-
-- **PoseEstimatorNode:**
-  Participants are provided with Python templates for the PoseEstimatorNode. Your task is to implement the callback function (e.g., `get_pose_estimates`) that performs the required computation. Since the API is simply a ROS endpoint, you can use any of the available [ROS 2 client libraries](https://docs.ros.org/en/jazzy/Concepts/Basic/About-Client-Libraries.html#client-libraries) including C++, Python, Rust, Node.js, or C#. Please use [ROS 2 Jazzy Jalisco](https://docs.ros.org/en/jazzy/index.html).
-
-- **TesterNode:**
-  A fully implemented TesterNode is provided that:
-  - Uses the bop_toolkit_lib to load the test dataset and prepare image inputs.
-  - Repeatedly calls the PoseEstimatorNode service over the `/get_pose_estimates` endpoint.
-  - Collects and combines results from multiple service calls.
-  - Saves the compiled results to disk in CSV format.
-
-### Containerization
-
-To simplify the evaluation process, Dockerfiles are provided to generate container images for both the PoseEstimatorNode and the TesterNode. This ensures that users can run their models without having to configure a dedicated ROS environment manually.
-
-## Submission Instructions <a name="submission"></a>
-
-Participants are expected to modify the estimator code to implement their solution. Once completed, your custom estimator should be containerized using Docker and submitted according to the challenge requirements. You can find detailed submission instructions [here](https://bpc.opencv.org/web/challenges/challenge-page/1/submission). Please make sure to register a team to get access to the submission instructions. 
-
-## Setting up <a name="settingup"></a>
-
-The following instructions will guide you through the process of validating your submission locally before official submission.
-
-#### Requirements
-
-- [Docker](https://docs.docker.com/) installed with the user in docker group for passwordless invocations. Ensure Docker Buildx is installed (`docker buildx version`). If not, install it with `apt install docker-buildx-plugin` or `apt install docker-buildx` (distribution-dependent). 
-- 7z -- `apt install p7zip-full`
-- Python3 with virtualenv  -- `apt install python3-virtualenv`
-- The `ibpc` and `rocker` CLI tools are tested on Linux-based machines. Due to known Windows issues, we recommend Windows users develop using [WSL](https://learn.microsoft.com/en-us/windows/wsl/about).
-
-> Note: Participants are expected to submit Docker containers, so all development workflows are designed with this in mind.
-
-#### Setup a workspace
+1. Clone the repository:
 ```bash
-mkdir -p ~/bpc_ws
+git clone [your-repository-url]
+cd test-results-visualizer
 ```
 
-#### Create a virtual environment 
-
-📄 If you're already working in some form of virtualenv you can continue to use that and install `bpc` in that instead of making a new one. 
-
+2. Install required dependencies:
 ```bash
-python3 -m venv ~/bpc_ws/bpc_env
+pip install opencv-python numpy open3d pillow
 ```
 
-#### Activate that virtual env
+3. Ensure you have the required helper modules in the `helpers/` directory:
+- `read_dataset.py`
+- `read_test_dataset.py` 
+- `pxl_2_point.py`
+- `process_scene_data.py`
 
+## Usage
+
+### Starting the Application
 ```bash
-source ~/bpc_ws/bpc_env/bin/activate
+python ui.py
 ```
 
-For any new shell interacting with the `bpc` command you will have to rerun this source command.
+### Ground Truths Tab Workflow
 
-#### Install bpc 
+1. **Select Dataset Root Folder**: Choose the main dataset directory containing RGB images and depth data
+2. **Select 3D Models Path**: Choose directory containing 3D object models (.ply files)
+3. **Process Dataset**: Click "Read Dataset" to generate master CSV with scene annotations
+4. **Load Image + PCL**: Select a row from the CSV table and load corresponding RGB-D data
+5. **Visualize in 3D**: Click "Open 3D Viewer" to see point cloud with ground truth poses
 
-Install the bpc command from the ibpc pypi package. (bpc was already taken :-( )
+### Test Results Tab Workflow
 
-```bash
-pip install ibpc
-```
+1. **Select Dataset Path**: Choose test dataset directory
+2. **Process Test Dataset**: Generate test CSV with scene information
+3. **Load Image + PCL**: Select a scene and load RGB-D data
+4. **Run Detection**: Execute the full detection and pose estimation pipeline
+5. **Navigate Results**: Use arrow buttons to browse through detection results and feature correspondences
+6. **Visualize in 3D**: View point cloud with estimated object poses
 
-#### Fetch the source repository
+## Method
 
-```bash
-cd ~/bpc_ws
-git clone https://github.com/opencv/bpc.git
-```
+This application implements a multi-view object detection and 6D pose estimation pipeline for RGB-D datasets. The method consists of several key stages:
 
-#### Fetch the dataset
+### Pipeline Overview
 
-```bash
-cd ~/bpc_ws/bpc
-bpc fetch ipd
-```
-This will download the ipd_base.zip, ipd_models.zip, and ipd_val.zip (approximately 6GB combined). The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
-
-#### Quickstart with prebuilt images
-```bash
-bpc test ghcr.io/opencv/bpc/bpc_pose_estimator:example ipd
-```
-This will download the prebuilt zenoh, tester, and pose_estimator images and run containers based on them. The pose_estimator image contains an empty get_pose_estimates function. After the containers start, you should see the following in your terminal:
-```
-[INFO] [1740003838.048516355] [bpc_pose_estimator]: Starting bpc_pose_estimator...
-[INFO] [1740003838.049547292] [bpc_pose_estimator]: Model directory set to /opt/ros/underlay/install/models.
-[INFO] [1740003838.050190130] [bpc_pose_estimator]: Pose estimates can be queried over srv /get_pose_estimates.
-```
-### Build and test custom bpc_pose_estimator image <a name="build_custom_bpc_pe"></a>
-
-You can then build custom bpc_pose_estimator image with your updated get_pose_estimates function
-
-```bash
-cd ~/bpc_ws/bpc
-docker buildx build -t <POSE_ESTIMATOR_DOCKER_TAG> \
-    --file ./Dockerfile.estimator \
-    --build-arg="MODEL_DIR=models" \
-    .
-```
-
-and run it with the following command
-```bash
-bpc test <POSE_ESTIMATOR_DOCKER_TAG> ipd
-```
-
-For example: 
-```bash
-cd ~/bpc_ws/bpc
-docker buildx build -t bpc_pose_estimator:example \
-    --file ./Dockerfile.estimator \
-    --build-arg="MODEL_DIR=models" \
-    .
-bpc test bpc_pose_estimator:example ipd
-```
-This will validate your pose_estimator image against the local copy of validation dataset.
-When you build a new image you rerun this test.
-
-The console output will show the system getting started and then the output of the estimator. 
-
-If you would like to interact with the estimator and run alternative commands or anything else in the container you can invoke it with `--debug`
-
-The tester console output will be streamed to the file `ibpc_test_output.log` Use this to see it
-
-```bash
-tail -f ibpc_test_output.log
-```
-
-The results will come out as `submission.csv` when the tester is complete.
-
-### Baseline Solution <a name="baseline_solution"></a>
-
-We provide a simple baseline solution as a reference for implementing the solution in `ibpc_pose_estimator_py`. Please refer to the [baseline_solution](https://github.com/opencv/bpc/tree/baseline_solution) branch and follow the instructions there.
+The detection pipeline processes multi-camera RGB-D scenes through the following stages. The system consolidates detections across multiple camera views using spatial clustering and feature-based correspondence.
 
 
-### Tips
+![Alt text](Picture1.png)
+![Alt text](Picture3.png)
 
-🐌 **If you are iterating a lot of times with the validation and are frustrated by how long the cuda installation is, you can add it to your Dockerfile as below.**
-It will make the image significantly larger, but faster to iterate if you put it higher in the dockerfile. We can't include it in the published image because the image gets too big for hosting and pulling easily.
+
+---
+
+The method leverages:
+- **Mask R-CNN** for initial object detection and segmentation
+- **Multi-view geometric constraints** for detection consolidation
+- **SuperGlue feature matching** for establishing correspondences
+- **PnP algorithms** for 6D pose estimation
+- **Point cloud registration** for pose refinement
+
+## File Structure
 
 ```
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget software-properties-common gnupg2 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN \
-  wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
-  dpkg -i cuda-keyring_1.1-1_all.deb && \
-  rm cuda-keyring_1.1-1_all.deb && \
-  \
-  apt-get update && \
-  apt-get -y install cuda-toolkit && \
-  rm -rf /var/lib/apt/lists/*
+├── ui.py                          # Main application entry point
+├── ground_truths_tab.py           # Ground truth visualization interface
+├── test_results_tab.py            # Test results visualization interface
+├── helpers/
+│   ├── read_dataset.py            # Dataset processing utilities
+│   ├── read_test_dataset.py       # Test dataset processing
+│   ├── pxl_2_point.py            # Point cloud generation
+│   └── process_scene_data.py      # Scene processing and detection pipeline
+└── meta_data/                     # Generated CSV files and metadata
 ```
 
-## Further Details
+## Dataset Format
 
-The above is enough to get you going.
-However we want to be open about what else were doing.
-You can see the source of the tester and build your own version as follows if you'd like. 
-
-### If you would like the training data and test data <a name="download_train_data"></a>
-
-Use the command:
-```bash
-bpc fetch ipd_all
+### Expected Directory Structure
 ```
-The dataset is also available for manual download on [Hugging Face](https://huggingface.co/datasets/bop-benchmark/ipd).
-
-### Manually Run components 
-
-It is possible to manually run the components.
-`bpc` shows what it is running on the console output.
-Or you can run as outlined below. 
-
-
-#### Start the Zenoh router
-
-```bash
-docker run --init --rm --net host eclipse/zenoh:1.2.1 --no-multicast-scouting
+dataset_root/
+├── rgb_cam1/                      # RGB images from camera 1
+├── rgb_cam2/                      # RGB images from camera 2
+├── rgb_photoneo/                  # RGB images from Photoneo camera
+├── depth_cam1/                    # Corresponding depth images
+├── depth_cam2/
+├── depth_photoneo/
+├── scene_camera_cam1.json         # Camera intrinsic parameters
+├── scene_camera_cam2.json
+└── scene_camera_photoneo.json
 ```
 
-#### Run the pose estimator
-We use [rocker](https://github.com/osrf/rocker) to add GPU support to Docker containers. To install rocker, run `pip install rocker` on the host machine.
-```bash
-rocker --nvidia --cuda --network=host bpc_pose_estimator:example
+### Camera Parameter Format
+```json
+{
+  "0": {
+    "cam_K": [fx, 0, cx, 0, fy, cy, 0, 0, 1],
+    "depth_scale": 1000
+  }
+}
 ```
 
-#### Run the tester
+## Features and Controls
 
-> Note: Substitute the <PATH_TO_DATASET> with the directory that contains the [ipd](https://huggingface.co/datasets/bop-benchmark/ipd/tree/main) dataset. Similarly, substitute <PATH_TO_OUTPUT_DIR> with the directory that should contain the results from the pose estimator. By default, the results will be saved as a `submission.csv` file but this filename can be updated by setting the `OUTPUT_FILENAME` environment variable.
+### Image Visualization
+- **Zoom Controls**: Use +/- buttons to zoom in/out of images
+- **Pan Navigation**: Click and drag to pan around zoomed images
+- **Multi-View Navigation**: Use arrow buttons to switch between camera views
+- **Mask Overlays**: Ground truth masks and detection results overlay on RGB images
 
-```bash
-docker run --network=host -e BOP_PATH=/opt/ros/underlay/install/datasets -e SPLIT_TYPE=val -v<PATH_TO_DATASET>:/opt/ros/underlay/install/datasets -v<PATH_TO_OUTPUT_DIR>:/submission -it bpc_tester:latest
-```
+### 3D Visualization
+- **Point Cloud Display**: Colored 3D point clouds from RGB-D data
+- **Pose Markers**: Coordinate frames showing object orientations
+- **Interactive Navigation**: Mouse controls for 3D scene exploration
+- **Multi-Object Support**: Simultaneous visualization of multiple detected objects
 
-### Build the bpc_tester image
-Generally not required, but to build the tester image, run the following command:
-```bash
-cd ~/bpc_ws/bpc
-docker buildx build -t bpc_tester:latest \
-    --file ./Dockerfile.tester \
-    .
-```
-You can then use your tester image with the bpc tool, as shown in the example below:
-```bash
-bpc test bpc_pose_estimator:example ipd --tester-image bpc_tester:latest
-```
+## Troubleshooting
+
+### Common Issues
+
+**"No folder selected" Error**
+- Ensure you've selected both dataset root folder and 3D models path before processing
+
+**"Depth image not found" Error**
+- Check that depth images exist in expected directories (depth_cam1/, depth_photoneo/, etc.)
+- Verify image filenames match between RGB and depth directories
+
+**Point Cloud Display Issues**
+- Ensure depth_scale parameter is correct for your dataset
+- Check that camera intrinsic parameters are properly formatted
+- Verify OpenGL support for 3D visualization
+
+**Memory Issues with Large Datasets**
+- Close 3D viewer windows when not needed
+- Process smaller subsets of data for testing
+- Ensure sufficient RAM for point cloud processing
+
+**Detection Pipeline Errors**
+- Verify all helper modules are present in helpers/ directory
+- Check that required model files are accessible
+- Ensure GPU memory is sufficient for inference
+
+### Performance Tips
+
+- Use appropriate image scaling for large datasets
+- Close unused visualization windows
+- Process test scenes in smaller batches
+- Enable GPU acceleration when available
+
+## Output Files
+
+The application generates several output files in the `meta_data/` directory:
+
+- `master_dataset_[timestamp].csv`: Complete dataset annotations with ground truth poses
+- `test_dataset.csv`: Test scene information for evaluation
+- Temporary detection and feature matching results
+
+## Contributing
+
+When adding new features:
+1. Follow the existing tab-based architecture
+2. Implement proper error handling for file I/O operations
+3. Add progress indicators for long-running operations
+4. Maintain consistent UI styling with existing tabs
+
+## License
+
+[Insert your license information here]
