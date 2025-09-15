@@ -15,6 +15,7 @@ import torch
 from functools import partial
 import threading
 
+import funcs
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pcl_builder')))
 from create_pointcloud_gpu_accelerated import build_pcl
@@ -31,8 +32,6 @@ from estimate_pose import PoseEstimator
 from update_detection_json import add_3d_centers_to_json, find_valid_neighbor_pixel, transform_3d_point,  transform_pose_to_world
 from pose_estimator import compute_rigid_transform
 
-sys.path.append('/home/ram/bpc_ws/bpc/new_pose_estimator')
-from optimize_pose import PoseRefiner   
 
 
 def process_single_mask_rcnn_cpu_only(args):
@@ -529,7 +528,57 @@ class process_scene_data:
         
         print(f"Feature matching completed in {time.time() - start_time:.2f} seconds")
 
+
     def do_feature_matchings(self):
+        for i in range(0,len(self.consolidated_detections)):
+            # print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
+            
+            self.display_results["nb_maskrcnn_detections"] = self.consolidated_detections[i][0]
+
+            for j in range(0, len(self.consolidated_detections[i])):
+
+                detection = self.detections[self.consolidated_detections[i][j]]
+                row_num = detection[4]
+                mask_idx = detection[3]
+                camera_id = detection[1]
+                object_id = int(detection[0].split('_')[1])
+                mask = self.scene_data[row_num]["detection_json"]["results"][0]["masks"][mask_idx]["points"]
+                image_id = self.scene_data[row_num]["image_index"]
+                scene_id = self.scene_data[row_num]["scene_id"]
+
+                result = {'scene_cam_row_num': row_num,
+                            'camera_id': camera_id,
+                            'mask_idx': mask_idx,
+                            'object_idx': object_id,
+                            'ref_row': None,
+                            'h_mat': None,
+                            'confidence': 0.005,
+                            'num_matches': 0,
+                            'matched_points0': None,
+                            'matched_points1': None,
+                            'matched_points0_3d' : None,
+                            'matched_points1_3d' : None}
+                
+
+                mesh_path = self.mesh_dir + '/obj_' + str(f"{object_id:06d}") + '.ply'
+                image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
+                init_tvec = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
+                K = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3)
+                polygon_mask_coordinates = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
+
+                
+                funcs.estimate_pose(image=image, 
+                                    polygon_coords=polygon_mask_coordinates, 
+                                    mesh_path=mesh_path, 
+                                    cam_K=K,
+                                    init_tvec=np.array(init_tvec, dtype=np.float32),
+                                    save_path=os.path.join(self.meta_data_path, "pose_estimation"))
+
+                return result
+
+
+
+    def do_feature_matchings_copy(self):
         
         for i in range(0,len(self.consolidated_detections)):
             # print("Detections shape: ", len(self.consolidated_detections),len(self.consolidated_detections[i]))
@@ -635,23 +684,34 @@ class process_scene_data:
                     self.detections_homographies.append(result)
                     mesh_path = self.mesh_dir + '/obj_' + str(f"{object_id:06d}") + '.ply'
                     image_size = (int(self.scene_data[row_num]['image_width']), int(self.scene_data[row_num]['image_height']))  
+                    polygon_mask_coordinates = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
+                    image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
+
+                    mask_image = funcs.create_polygon_mask(image, polygon_mask_coordinates)
+
+                    
+
+
                     refiner = PoseRefiner(
                         mesh_path=mesh_path,
-                        camera_matrix = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3),
+                        K = np.array([float(self.scene_data[row_num][f'k{n//3+1}{n%3+1}']) for n in range(9)]).reshape(3, 3),
                         image_size=image_size
                     )
 
-                    init_tvec = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_world']
+                    init_tvec = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
                     init_rvec = np.array([0.0, 0.0, 0.0], dtype=np.float64)
-                    polygon_mask_coordinates = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['points']
+                    
 
-                    polygon_mask = refiner.create_mask_from_polygon(polygon_mask_coordinates)
-    
-                    output = refiner.optimize_pose(target_mask= polygon_mask,
+                    polygon_mask = refiner.create_polygon_mask(polygon_mask_coordinates)
+
+                    output = refiner.refine_pose(target_mask= polygon_mask,
                                                 init_rvec=init_rvec,
-                                                init_tvec=init_tvec,
-                                                method="multi_stage",
-                                                metric="iou")
+                                                init_tvec=init_tvec)
+                    
+                    image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
+                    
+                    metrics = refiner.visualize_results(image, polygon_mask, output['rvec'], output['tvec'])
+                    print(f"✓ Final IoU: {metrics['iou']:.4f}")
 
                     print("rvec: ", output['rvec'] )
                     print("tvec: ", output['tvec'] )
@@ -659,10 +719,11 @@ class process_scene_data:
                     
                     result['rmse'] = 0.5
                     
-                    image = self.scene_data[result['scene_cam_row_num']]["rgb_img"]
                     
-                    R_test_cam = pose_predictor.estimate_pose(image, [polygon_mask])                    
-                    T_test_cam = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
+                    
+                    R_test_cam = cv2.Rodrigues(output['rvec'])[0]
+                    # T_test_cam = self.scene_data[result['scene_cam_row_num']]['detection_json']['results'][0]['masks'][result['mask_idx']]['object_center_3d_local']
+                    T_test_cam = output['tvec']
 
                     R_test_world, T_test_world = transform_pose_to_world(R_test_cam, T_test_cam, self.scene_data[result['scene_cam_row_num']])
 
@@ -684,8 +745,6 @@ class process_scene_data:
 
                     self.display_results["results_summary"].append(summary_result)
 
-                    del pose_predictor
-                    torch.cuda.empty_cache()
 
     def compute_6d_poses(self, detection_result):
         result = detection_result

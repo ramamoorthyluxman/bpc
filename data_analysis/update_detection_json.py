@@ -133,54 +133,7 @@ def transform_pose_to_world(rotation_matrix, position, csv_row):
     return transformed_rotation, transformed_position
 
 
-def transform_pose_to_world_backup(R_camera, T_camera, csv_row):
-    """
-    Transform a pose (rotation matrix + translation) from camera coordinates to world coordinates.
-    
-    Args:
-        R_camera: 3x3 numpy array representing rotation matrix in camera space
-        T_camera: 3D numpy array representing translation vector in camera space
-        csv_row: Pandas Series or dict containing transformation data with keys:
-                cam_R_w2c_0 to cam_R_w2c_8 (rotation matrix elements)
-                cam_t_w2c_0 to cam_t_w2c_2 (translation vector elements)
-    
-    Returns:
-        tuple: (R_world, T_world)
-               - R_world: 3x3 numpy array representing rotation matrix in world space
-               - T_world: 3D numpy array representing translation vector in world space
-    """
-    # Convert inputs to numpy arrays
-    R_camera = np.array(R_camera, dtype=float)
-    T_camera = np.array(T_camera, dtype=float)
-    
-    # Extract rotation matrix elements and reshape to 3x3
-    rotation_elements = [
-        csv_row['cam_R_w2c_0'], csv_row['cam_R_w2c_1'], csv_row['cam_R_w2c_2'],
-        csv_row['cam_R_w2c_3'], csv_row['cam_R_w2c_4'], csv_row['cam_R_w2c_5'],
-        csv_row['cam_R_w2c_6'], csv_row['cam_R_w2c_7'], csv_row['cam_R_w2c_8']
-    ]
-    R_w2c = np.array(rotation_elements, dtype=float).reshape(3, 3)
-    
-    # Extract translation vector
-    t_w2c = np.array([
-        csv_row['cam_t_w2c_0'],
-        csv_row['cam_t_w2c_1'],
-        csv_row['cam_t_w2c_2']
-    ], dtype=float)
-    
-    # Camera-to-world transformation
-    R_c2w = R_w2c.T  # Inverse of rotation matrix is its transpose
-    # R_c2w = R_w2c
 
-    # Transform translation: world_translation = R_c2w @ (camera_translation - t_w2c)
-    # Following the same pattern as the original 3D point transformation
-    # T_world = (R_c2w @ T_camera) - t_w2c
-    T_world = (R_c2w @ T_camera) + t_w2c
-    
-    # Transform rotation: R_world = R_c2w @ R_camera
-    R_world = R_c2w @ R_camera
-    
-    return R_world, T_world
 
 
 def add_3d_centers_to_json(cam_row: None,                           
@@ -214,22 +167,8 @@ def add_3d_centers_to_json(cam_row: None,
         geometric_center = obj['geometric_center']         
         mask_coordinates = obj.get('points', [])  # Mask coordinates are in 'points' field
         
-        # Compute oriented bounding box from mask coordinates
-        if mask_coordinates:
-            # Convert mask coordinates to numpy array format for OpenCV
-            mask_points = np.array(mask_coordinates, dtype=np.float32)
-            
-            # Compute oriented bounding box using OpenCV
-            rect = cv2.minAreaRect(mask_points)
-            # rect contains: ((center_x, center_y), (width, height), angle)
-            
-            # Extract oriented bounding box center
-            bbox_center_u = int(rect[0][0])  # center_x
-            bbox_center_v = int(rect[0][1])  # center_y
-        else:
-            # Fallback to geometric center if no mask coordinates available
-            bbox_center_u, bbox_center_v = geometric_center[0], geometric_center[1]
-            print(f"  ⚠️ No mask coordinates found for object {i}, using geometric center")
+        
+        
         
         # Use geometric center for depth (Z value)
         depth_u, depth_v = geometric_center[0], geometric_center[1]  # u=column, v=row                   
@@ -245,22 +184,13 @@ def add_3d_centers_to_json(cam_row: None,
             int(depth_u), int(depth_v), depth_path, k_matrix, depth_scale, search_radius         
         )
         
-        # Get X, Y coordinates from bounding box center
-        bbox_point_3d, bbox_used_pixel = find_valid_neighbor_pixel(             
-            int(bbox_center_u), int(bbox_center_v), depth_path, k_matrix, depth_scale, search_radius         
-        )
-        
-        if depth_point_3d is not None and bbox_point_3d is not None:
-            # Create hybrid 3D point: X,Y from bounding box center, Z from geometric center
-            hybrid_point_3d = [float(bbox_point_3d[0]), float(bbox_point_3d[1]), float(depth_point_3d[2])]
-            
+        if depth_point_3d is not None:
             # Store local coordinates
-            obj['object_center_3d_local'] = hybrid_point_3d
+            obj['object_center_3d_local'] = [float(depth_point_3d[0]), float(depth_point_3d[1]), float(depth_point_3d[2])]
             
             # Transform to world coordinates
-            obj['object_center_3d_world'] = transform_3d_point(hybrid_point_3d, cam_row)
+            obj['object_center_3d_world'] = transform_3d_point(obj['object_center_3d_local'], cam_row)
             
-            print(f"  ✅ Hybrid 3D point computed: oriented_bbox_center=({bbox_center_u}, {bbox_center_v}), depth_center=({depth_u}, {depth_v})")
                                    
         else:             
             obj['object_center_3d_local'] = None             
