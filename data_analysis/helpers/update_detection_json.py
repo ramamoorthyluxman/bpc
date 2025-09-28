@@ -204,5 +204,8 @@ def add_3d_centers_to_json(cam_row: None,
     return json_data
 
 
+
+
+
 # Example usage:
 # updated_json = add_3d_centers_to_json(your_json_data, "depth.png", "camera.json")

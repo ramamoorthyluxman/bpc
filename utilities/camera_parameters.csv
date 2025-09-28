@@ -1,5 +1,0 @@
-camera_name,cam1_cx,cam1_cy,cam1_depth_scale,cam1_fx,cam1_fy,cam1_height,cam1_width,cam2_cx,cam2_cy,cam2_depth_scale,cam2_fx,cam2_fy,cam2_height,cam2_width,cam3_cx,cam3_cy,cam3_depth_scale,cam3_fx,cam3_fy,cam3_height,cam3_width,photoneo_cx,photoneo_cy,photoneo_depth_scale,photoneo_fx,photoneo_fy,photoneo_height,photoneo_width
-cam1,1954.1872863769531,1103.6978149414062,0.1,3981.985991142684,3981.985991142684,2160.0,3840.0,,,,,,,,,,,,,,,,,,,,,
-cam2,,,,,,,,1908.6146087646484,1103.989730834961,0.1,3920.8190044234093,3920.8190044234093,2160.0,3840.0,,,,,,,,,,,,,,
-cam3,,,,,,,,,,,,,,,1890.7140045166016,1075.8029479980469,0.1,3908.143157924693,3908.143157924693,2160.0,3840.0,,,,,,,
-photoneo,,,,,,,,,,,,,,,,,,,,,,1053.13,805.064,0.1,2320.26,2320.15,1544.0,2064.0
