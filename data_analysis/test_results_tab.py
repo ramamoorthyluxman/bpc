@@ -132,11 +132,231 @@ class TestResultsTab:
                 foreground="blue"
             )
 
+    def generate_bpc_results(self):
+        """Generate BPC results CSV for entire test dataset"""
+        # Check if CSV is loaded
+        if not self.test_csv_tree.get_children():
+            messagebox.showwarning("No Data", "Please load test dataset CSV first")
+            return
+        
+        # Ask user for confirmation
+        total_rows = len(self.test_csv_tree.get_children())
+        if not messagebox.askyesno("Confirm", f"Process {total_rows} rows for BPC results?\nThis may take a long time."):
+            return
+        
+        # Prepare output file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        meta_data_dir = os.path.join(script_dir, "meta_data")
+        os.makedirs(meta_data_dir, exist_ok=True)
+        output_path = os.path.join(meta_data_dir, "bpc_results.csv")
+        
+        # Create progress dialog
+        self.progress_dialog = tk.Toplevel()
+        self.progress_dialog.title("Generating BPC Results")
+        self.progress_dialog.geometry("400x150")
+        self.progress_dialog.resizable(False, False)
+        self.progress_dialog.grab_set()
+        
+        # Progress label
+        self.progress_label = ttk.Label(self.progress_dialog, text="Preparing...")
+        self.progress_label.pack(pady=10)
+        
+        # Progress bar
+        self.progress_bar = ttk.Progressbar(self.progress_dialog, mode='determinate')
+        self.progress_bar.pack(pady=10, padx=20, fill='x')
+        
+        # Cancel button
+        self.cancel_processing = False
+        cancel_btn = ttk.Button(self.progress_dialog, text="Cancel", command=self.cancel_bpc_processing)
+        cancel_btn.pack(pady=5)
+        
+        # Start processing in background thread
+        self.bpc_thread = threading.Thread(target=self.process_bpc_results_thread, args=(output_path,))
+        self.bpc_thread.daemon = True
+        self.bpc_thread.start()
+
+    def process_bpc_results_thread(self, output_path):
+        """Process BPC results in background thread"""
+        try:
+            # Group data by (scene_id, image_index)
+            headers = self.test_csv_tree['columns']
+            grouped_data = defaultdict(list)
+            
+            for item_id in self.test_csv_tree.get_children():
+                row_values = self.test_csv_tree.item(item_id, 'values')
+                row = dict(zip(headers, row_values))
+                
+                scene_id = row['scene_id']
+                image_id = row['image_index']
+                key = (scene_id, image_id)
+                grouped_data[key].append(row)
+            
+            total_groups = len(grouped_data)
+            processed_groups = 0
+            
+            # Update UI
+            root = self.notebook.nametowidget(self.notebook.winfo_toplevel())
+            root.after(0, self.update_progress, f"Processing {total_groups} scenes...", 0, total_groups)
+            
+            # Initialize CSV file with headers
+            with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
+                csv_writer = csv.writer(csvfile)
+                csv_writer.writerow(['scene_id', 'im_id', 'obj_id', 'score', 'R', 't', 'time'])
+            
+            # Process each group
+            for (scene_id, image_id), matching_rows in grouped_data.items():
+                if self.cancel_processing:
+                    break
+                    
+                try:
+                    # Update progress
+                    root.after(0, self.update_progress, f"Processing scene {scene_id}, image {image_id}...", processed_groups, total_groups)
+                    
+                    # Check for photoneo camera
+                    photoneo_row = None
+                    for row in matching_rows:
+                        if row['camera_type'] == 'photoneo':
+                            photoneo_row = row
+                            break
+                    
+                    if photoneo_row is None:
+                        print(f"Warning: No photoneo camera found for scene {scene_id}, image {image_id}")
+                        processed_groups += 1
+                        continue
+                    
+                    # Process scene data (same as run_detection_clicked)
+                    start_time = time.time()
+                    scene_info = process_scene_data(matching_rows)
+                    scene_info.mask_objects()
+                    scene_info.consolidate_detections()
+                    scene_info.do_feature_matchings()
+                    end_time = time.time()
+                    processing_time = end_time - start_time
+                    
+                    # Extract results and write to CSV immediately
+                    results_summary = scene_info.display_results.get("results_summary", [])
+                    
+                    # Write results to CSV
+                    with open(output_path, 'a', newline='', encoding='utf-8') as csvfile:
+                        csv_writer = csv.writer(csvfile)
+                        
+                        for result in results_summary:
+                            obj_id = result.get("object ID", "Unknown")
+                            rmse = result.get("rmse", 0.0)
+                            R_test_world = result.get("R_test_world")
+                            T_test_world = result.get("T_test_world")
+                            
+                            if R_test_world is not None and T_test_world is not None:
+                                # Format R matrix as space-separated string (flatten 3x3 matrix)
+                                R_flat = np.array(R_test_world).flatten()
+                                R_str = ' '.join([f"{val}" for val in R_flat])
+                                
+                                # Format T vector as space-separated string
+                                T_str = ' '.join([f"{val}" for val in T_test_world])
+                                
+                                # Write row
+                                csv_writer.writerow([scene_id, image_id, obj_id, rmse, R_str, T_str, processing_time])
+                    
+                    # Clean up memory
+                    del scene_info
+                    gc.collect()
+                    
+                except Exception as e:
+                    print(f"Error processing scene {scene_id}, image {image_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                processed_groups += 1
+            
+            # Update UI - completion
+            if self.cancel_processing:
+                root.after(0, self.bpc_processing_complete, False, output_path, processed_groups, total_groups)
+            else:
+                root.after(0, self.bpc_processing_complete, True, output_path, processed_groups, total_groups)
+                
+        except Exception as e:
+            root = self.notebook.nametowidget(self.notebook.winfo_toplevel())
+            root.after(0, self.bpc_processing_error, str(e))
+            
+    def update_progress(self, message, current, total):
+        """Update progress dialog"""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog.winfo_exists():
+            self.progress_label.config(text=message)
+            if total > 0:
+                progress_value = (current / total) * 100
+                self.progress_bar['value'] = progress_value
+
+    def bpc_processing_complete(self, success, output_path, processed, total):
+        """Handle BPC processing completion"""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog.winfo_exists():
+            self.progress_dialog.destroy()
+        
+        if success:
+            messagebox.showinfo("Success", f"BPC results generated successfully!\n\nProcessed: {processed}/{total} scenes\nOutput: {output_path}")
+        else:
+            messagebox.showwarning("Cancelled", f"Processing cancelled.\n\nProcessed: {processed}/{total} scenes\nPartial results saved to: {output_path}")
+
+    def bpc_processing_error(self, error_msg):
+        """Handle BPC processing error"""
+        if hasattr(self, 'progress_dialog') and self.progress_dialog.winfo_exists():
+            self.progress_dialog.destroy()
+        
+        messagebox.showerror("Error", f"Error during BPC processing:\n{error_msg}")
+
+    def cancel_bpc_processing(self):
+        """Cancel BPC processing"""
+        self.cancel_processing = True
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.destroy()
+
+
+    def toggle_select_all(self):
+        """Toggle selection of all rows"""
+        all_items = self.test_csv_tree.get_children()
+        
+        if self.select_all_var.get():
+            self.test_csv_tree.selection_set(all_items)
+            # Disable buttons when select all is active
+            self.load_button.config(state='disabled')
+            self.detect_button.config(state='disabled')
+            self.open3d_button.config(state='disabled')
+            # Show generate button
+            self.generate_button.pack(side='left', padx=(10, 0))
+        else:
+            self.test_csv_tree.selection_remove(all_items)
+            # Re-enable buttons
+            self.load_button.config(state='normal')
+            self.detect_button.config(state='normal')
+            self.open3d_button.config(state='normal')
+            # Hide generate button
+            self.generate_button.pack_forget()
+
     def setup_test_csv_display(self):
         """Setup the CSV display table with scrollbars for test results"""
         # Label for CSV display
         csv_label = ttk.Label(self.frame, text="Test Results CSV Content:")
         csv_label.pack(anchor='nw', padx=10, pady=(20, 5))
+
+        # Frame for checkbox and generate button
+        checkbox_frame = ttk.Frame(self.frame)
+        checkbox_frame.pack(anchor='nw', padx=10, pady=(0, 5))
+
+        # Select all checkbox
+        self.select_all_var = tk.BooleanVar()
+        select_all_checkbox = ttk.Checkbutton(
+            self.frame,
+            text="Select All",
+            variable=self.select_all_var,
+            command=self.toggle_select_all
+        )
+        select_all_checkbox.pack(anchor='nw', padx=10, pady=(0, 5))
+
+        # Generate button (initially hidden)
+        self.generate_button = ttk.Button(
+            checkbox_frame,
+            text="Generate BPC Results CSV",
+            command=self.generate_bpc_results
+        )
         
         # Frame for the table and scrollbars - fixed height, full width
         table_frame = ttk.Frame(self.frame)
