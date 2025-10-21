@@ -12,7 +12,11 @@ import open3d as o3d
 import json
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 from collections import Counter
+import sys
 
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.', 'helpers')))
+from train_new_dataset import TrainNewDataset
 
 class GroundTruthsTab:
     def __init__(self, notebook):
@@ -35,6 +39,9 @@ class GroundTruthsTab:
         self.current_point_cloud = None
         self.current_masks_data = None
         self.current_pose_data = None
+
+        # Initialize variable for depth checkbox
+        self.use_depth_var = tk.BooleanVar(value=True)  # Default to True
         
         # Setup the tab content
         self.setup_tab()
@@ -494,14 +501,28 @@ class GroundTruthsTab:
         # Button frame for training
         training_button_frame = ttk.Frame(training_frame)
         training_button_frame.pack(pady=10)
+
+        # Container for button and checkbox
+        controls_frame = ttk.Frame(training_button_frame)
+        controls_frame.pack()
         
         # Train Mask R-CNN button
         self.train_maskrcnn_button = ttk.Button(
-            training_button_frame,
+            controls_frame,
             text="Train Mask R-CNN",
             command=self.train_maskrcnn_clicked
         )
-        self.train_maskrcnn_button.pack()
+        self.train_maskrcnn_button.pack(side='left', padx=(0, 10))  # Packed first, on the left
+
+        # Use Depth checkbox
+        self.use_depth_checkbox = ttk.Checkbutton(
+            controls_frame,
+            text="Use Depth Images",
+            variable=self.use_depth_var,
+            onvalue=True,
+            offvalue=False
+        )
+        self.use_depth_checkbox.pack(side='left')
         
         # Training summary text area with scrollbar
         summary_frame = ttk.Frame(training_frame)
@@ -538,16 +559,56 @@ class GroundTruthsTab:
             return
         
         analysis = self.analyze_csv_data()
-        if analysis and not analysis['error']:
-            message = f"Training Mask R-CNN with:\n"
-            message += f"• {analysis['total_images']} images\n"
-            message += f"• {analysis['num_unique_classes']} classes\n"
-            message += f"• Classes: {', '.join(analysis['unique_classes'])}\n\n"
-            message += f"Training functionality to be implemented..."
+
+        if analysis and analysis['error']:
+            messagebox.showerror("Error", f"Cannot analyze dataset for training:\n{analysis['error']}")
+            return
+        
+        try:
+
+            # Get the checkbox value
+            use_depth = self.use_depth_var.get()
+
+            trainer = TrainNewDataset(
+                dataset_csv_path=self.current_csv_path,
+                use_depth=True
+            )
+        
+            if analysis and not analysis['error']:
+                message = f"Training initiated with:\n"
+                message += f"• Dataset: {os.path.basename(self.current_csv_path)}\n"
+                message += f"• {analysis['total_images']} images\n"
+                message += f"• {analysis['num_unique_classes']} classes\n"
+                message += f"• Classes: {', '.join(analysis['unique_classes'][:5])}"  # Show first 5 classes
+                if len(analysis['unique_classes']) > 5:
+                    message += f"... and {len(analysis['unique_classes']) - 5} more"
             
-            messagebox.showinfo("Training", message)
-        else:
-            messagebox.showerror("Error", "Cannot analyze dataset for training")
+                messagebox.showinfo("Training Started", message)
+            
+            # Optional: Update status label
+            self.status_label.config(
+                text="Training Mask R-CNN in progress...", 
+                foreground="orange"
+            )
+
+            # Optional: Disable the train button to prevent multiple instances
+            self.train_maskrcnn_button.config(state='disable')            
+            self.use_depth_checkbox.config(state='normal')
+
+            trainer.train()
+
+        except Exception as e:
+            messagebox.showerror("Training Error", f"Failed to initiate training:\n{str(e)}")
+            self.status_label.config(
+                text="Training failed to start", 
+                foreground="red"
+            )
+            # Re-enable button on error
+            self.train_maskrcnn_button.config(state='normal')
+
+        self.train_maskrcnn_button.config(state='normal')
+
+
     
     def extract_mask_data_from_row(self, row_values):
         """Extract mask data from CSV row"""

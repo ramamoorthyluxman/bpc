@@ -44,3 +44,4 @@ pointcloud_registration/output
 utilities/*.csv
 /data_analysis/meta_data/*
 /data_analysis/maskRCNN/results/*
+*.csv
