@@ -43,6 +43,11 @@ class GroundTruthsTab:
         # Initialize variable for depth checkbox
         self.use_depth_var = tk.BooleanVar(value=True)  # Default to True
         
+        # Training control variables
+        self.training_thread = None
+        self.training_stop_flag = None
+        self.is_training = False
+        
         # Setup the tab content
         self.setup_tab()
     
@@ -512,7 +517,7 @@ class GroundTruthsTab:
             text="Train Mask R-CNN",
             command=self.train_maskrcnn_clicked
         )
-        self.train_maskrcnn_button.pack(side='left', padx=(0, 10))  # Packed first, on the left
+        self.train_maskrcnn_button.pack(side='left', padx=(0, 10))
 
         # Use Depth checkbox
         self.use_depth_checkbox = ttk.Checkbutton(
@@ -524,36 +529,140 @@ class GroundTruthsTab:
         )
         self.use_depth_checkbox.pack(side='left')
         
-        # Training summary text area with scrollbar
-        summary_frame = ttk.Frame(training_frame)
-        summary_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        # Stop Training button (initially hidden)
+        self.stop_training_button = ttk.Button(
+            training_button_frame,
+            text="Stop Training",
+            command=self.stop_training_clicked,
+            state='disabled'
+        )
+        self.stop_training_button.pack(pady=(5, 0))
         
-        # Text widget with scrollbar
+        # Progress display frame
+        progress_frame = ttk.Frame(training_frame)
+        progress_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Training progress text area with scrollbar (initially showing summary)
+        self.training_progress = tk.Text(
+            progress_frame,
+            wrap=tk.WORD,
+            height=12,
+            width=40,
+            font=("Consolas", 8),
+            state='disabled'
+        )
+        
+        progress_scroll = ttk.Scrollbar(progress_frame, orient='vertical', command=self.training_progress.yview)
+        self.training_progress.configure(yscrollcommand=progress_scroll.set)
+        
+        # Grid layout for text and scrollbar
+        self.training_progress.grid(row=0, column=0, sticky='nsew')
+        progress_scroll.grid(row=0, column=1, sticky='ns')
+        
+        # Configure grid weights
+        progress_frame.grid_rowconfigure(0, weight=1)
+        progress_frame.grid_columnconfigure(0, weight=1)
+        
+        # Training summary text area (separate from progress)
         self.training_summary = tk.Text(
-            summary_frame,
+            progress_frame,
             wrap=tk.WORD,
             height=12,
             width=40,
             font=("Consolas", 9)
         )
         
-        training_scroll = ttk.Scrollbar(summary_frame, orient='vertical', command=self.training_summary.yview)
-        self.training_summary.configure(yscrollcommand=training_scroll.set)
-        
-        # Grid layout for text and scrollbar
+        # Initially show summary, hide progress
         self.training_summary.grid(row=0, column=0, sticky='nsew')
-        training_scroll.grid(row=0, column=1, sticky='ns')
-        
-        # Configure grid weights
-        summary_frame.grid_rowconfigure(0, weight=1)
-        summary_frame.grid_columnconfigure(0, weight=1)
+        self.training_progress.grid_remove()  # Hide initially
         
         # Initialize training summary
         self.training_summary.insert(tk.END, "Load CSV data to see training summary")
     
+    def update_training_progress(self, message):
+        """Update training progress display (thread-safe)"""
+        def update_ui():
+            self.training_progress.config(state='normal')
+            self.training_progress.insert(tk.END, message + "\n")
+            self.training_progress.see(tk.END)
+            self.training_progress.config(state='disabled')
+        
+        # Schedule UI update in main thread
+        self.frame.after(0, update_ui)
+    
+    def set_training_ui_state(self, is_training):
+        """Enable/disable UI elements based on training state"""
+        def update_ui():
+            if is_training:
+                # Show progress, hide summary
+                self.training_summary.grid_remove()
+                self.training_progress.grid(row=0, column=0, sticky='nsew')
+                
+                # Clear progress text
+                self.training_progress.config(state='normal')
+                self.training_progress.delete(1.0, tk.END)
+                self.training_progress.config(state='disabled')
+                
+                # Disable train button, checkbox; enable stop button
+                self.train_maskrcnn_button.config(state='disabled')
+                self.use_depth_checkbox.config(state='disabled')
+                self.stop_training_button.config(state='normal')
+            else:
+                # Show summary, hide progress
+                self.training_progress.grid_remove()
+                self.training_summary.grid(row=0, column=0, sticky='nsew')
+                
+                # Enable train button, checkbox; disable stop button
+                self.train_maskrcnn_button.config(state='normal')
+                self.use_depth_checkbox.config(state='normal')
+                self.stop_training_button.config(state='disabled')
+        
+        # Schedule UI update in main thread
+        self.frame.after(0, update_ui)
+    
+    def stop_training_clicked(self):
+        """Handle Stop Training button click"""
+        if self.training_stop_flag:
+            self.training_stop_flag.set()
+            self.update_training_progress("Stop requested by user...")
+            self.stop_training_button.config(state='disabled')
+    
+    def training_thread_func(self):
+        """Training function to run in separate thread"""
+        try:
+            # Get the checkbox value
+            use_depth = self.use_depth_var.get()
+            
+            # Create trainer with progress callback
+            trainer = TrainNewDataset(
+                dataset_csv_path=self.current_csv_path,
+                use_depth=use_depth,
+                progress_callback=self.update_training_progress,
+                stop_flag=self.training_stop_flag
+            )
+            
+            # Start training
+            trainer.train()
+            
+            # Training completed
+            self.update_training_progress("\n=== Training completed ===")
+            
+        except Exception as e:
+            error_msg = f"Training error: {str(e)}"
+            self.update_training_progress(f"\nERROR: {error_msg}")
+            
+            # Show error dialog in main thread
+            self.frame.after(0, lambda: messagebox.showerror("Training Error", error_msg))
+        
+        finally:
+            # Reset training state
+            self.is_training = False
+            self.training_thread = None
+            self.training_stop_flag = None
+            self.set_training_ui_state(False)
+    
     def train_maskrcnn_clicked(self):
         """Handle Train Mask R-CNN button click"""
-        # Placeholder for training functionality
         if not self.current_csv_path:
             messagebox.showwarning("No Data", "Please load CSV data first")
             return
@@ -564,51 +673,32 @@ class GroundTruthsTab:
             messagebox.showerror("Error", f"Cannot analyze dataset for training:\n{analysis['error']}")
             return
         
-        try:
-
-            # Get the checkbox value
-            use_depth = self.use_depth_var.get()
-
-            trainer = TrainNewDataset(
-                dataset_csv_path=self.current_csv_path,
-                use_depth=True
-            )
+        # Prepare training info message
+        if analysis and not analysis['error']:
+            message = f"Training initiated with:\n"
+            message += f"• Dataset: {os.path.basename(self.current_csv_path)}\n"
+            message += f"• {analysis['total_images']} images\n"
+            message += f"• {analysis['num_unique_classes']} classes\n"
+            message += f"• Classes: {', '.join(analysis['unique_classes'][:5])}"
+            if len(analysis['unique_classes']) > 5:
+                message += f"... and {len(analysis['unique_classes']) - 5} more"
         
-            if analysis and not analysis['error']:
-                message = f"Training initiated with:\n"
-                message += f"• Dataset: {os.path.basename(self.current_csv_path)}\n"
-                message += f"• {analysis['total_images']} images\n"
-                message += f"• {analysis['num_unique_classes']} classes\n"
-                message += f"• Classes: {', '.join(analysis['unique_classes'][:5])}"  # Show first 5 classes
-                if len(analysis['unique_classes']) > 5:
-                    message += f"... and {len(analysis['unique_classes']) - 5} more"
-            
-                messagebox.showinfo("Training Started", message)
-            
-            # Optional: Update status label
-            self.status_label.config(
-                text="Training Mask R-CNN in progress...", 
-                foreground="orange"
-            )
-
-            # Optional: Disable the train button to prevent multiple instances
-            self.train_maskrcnn_button.config(state='disable')            
-            self.use_depth_checkbox.config(state='normal')
-
-            trainer.train()
-
-        except Exception as e:
-            messagebox.showerror("Training Error", f"Failed to initiate training:\n{str(e)}")
-            self.status_label.config(
-                text="Training failed to start", 
-                foreground="red"
-            )
-            # Re-enable button on error
-            self.train_maskrcnn_button.config(state='normal')
-
-        self.train_maskrcnn_button.config(state='normal')
-
-
+            messagebox.showinfo("Training Started", message)
+        
+        # Set training state
+        self.is_training = True
+        self.training_stop_flag = threading.Event()
+        self.set_training_ui_state(True)
+        
+        # Update status label
+        self.status_label.config(
+            text="Training Mask R-CNN in progress...", 
+            foreground="orange"
+        )
+        
+        # Start training in separate thread
+        self.training_thread = threading.Thread(target=self.training_thread_func, daemon=True)
+        self.training_thread.start()
     
     def extract_mask_data_from_row(self, row_values):
         """Extract mask data from CSV row"""

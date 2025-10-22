@@ -16,9 +16,11 @@ from train import Trainer
 
 
 class TrainNewDataset:
-    def __init__(self, dataset_csv_path, use_depth=False):
+    def __init__(self, dataset_csv_path, use_depth=False, progress_callback=None, stop_flag=None):
         self.dataset_csv = self.load_csv(dataset_csv_path)
         self.use_depth = use_depth
+        self.progress_callback = progress_callback
+        self.stop_flag = stop_flag
         self.config = self.load_config('config.yaml')
         self.output_dir = os.path.join(self.config.get('meta_data_folder'), 'maskrcnn_training_data')
         self.prepare_maskrcnn_dataset(output_dir=self.output_dir)
@@ -35,27 +37,34 @@ class TrainNewDataset:
             reader = csv.DictReader(f)
             return list(reader)
 
+    def _report_progress(self, message):
+        """Report progress to callback if available"""
+        if self.progress_callback:
+            self.progress_callback(message)
+        print(message)
+
     def train(self):
         """Train Mask R-CNN model using the prepared dataset"""
-        print("Starting Mask R-CNN training...")
+        self._report_progress("Starting Mask R-CNN training...")
         
         # Determine which dataset folder to use
         if self.use_depth:
             data_path = os.path.join(self.output_dir, "depth")
-            print(f"Training with depth images from: {data_path}")
+            self._report_progress(f"Training with depth images from: {data_path}")
         else:
             data_path = os.path.join(self.output_dir, "rgb")
-            print(f"Training with RGB images from: {data_path}")
+            self._report_progress(f"Training with RGB images from: {data_path}")
         
         # Check if data path exists
         if not os.path.exists(data_path):
-            print(f"Error: Data path does not exist: {data_path}")
+            error_msg = f"Error: Data path does not exist: {data_path}"
+            self._report_progress(error_msg)
             return None
         
         # Create models directory within maskrcnn_training_data
         models_dir = os.path.join(self.output_dir, "models")
         os.makedirs(models_dir, exist_ok=True)
-        print(f"Models will be saved to: {models_dir}")
+        self._report_progress(f"Models will be saved to: {models_dir}")
         
         # Create arguments for the train script
         class Args:
@@ -78,25 +87,25 @@ class TrainNewDataset:
         args = Args()
         
         # Log training parameters
-        print("\nTraining parameters:")
-        print(f"  Data path: {args.data_path}")
-        print(f"  Output dir: {args.output_dir}")
-        print(f"  Batch size: {args.batch_size}")
-        print(f"  Epochs: {args.epochs}")
-        print(f"  Learning rate: {args.lr}")
-        print(f"  Save frequency: {args.save_freq} epochs")
+        self._report_progress("\nTraining parameters:")
+        self._report_progress(f"  Data path: {args.data_path}")
+        self._report_progress(f"  Output dir: {args.output_dir}")
+        self._report_progress(f"  Batch size: {args.batch_size}")
+        self._report_progress(f"  Epochs: {args.epochs}")
+        self._report_progress(f"  Learning rate: {args.lr}")
+        self._report_progress(f"  Save frequency: {args.save_freq} epochs")
         
         try:
-            # Call the training function
-            print("\nStarting training process...")
-            trainer = Trainer(args)
+            # Call the training function with progress callback and stop flag
+            self._report_progress("\nStarting training process...")
+            trainer = Trainer(args, progress_callback=self.progress_callback, stop_flag=self.stop_flag)
             trainer.train()
             
             # After training, return the path to the trained model
             final_model_path = os.path.join(models_dir, f"model_epoch_{args.epochs-1}.pth")
             if os.path.exists(final_model_path):
-                print(f"\nTraining completed successfully!")
-                print(f"Final model saved at: {final_model_path}")
+                self._report_progress(f"\nTraining completed successfully!")
+                self._report_progress(f"Final model saved at: {final_model_path}")
                 return final_model_path
             else:
                 # Look for any saved model
@@ -104,14 +113,15 @@ class TrainNewDataset:
                 if model_files:
                     latest_model = sorted(model_files)[-1]
                     latest_path = os.path.join(models_dir, latest_model)
-                    print(f"\nTraining completed. Latest model: {latest_path}")
+                    self._report_progress(f"\nTraining completed. Latest model: {latest_path}")
                     return latest_path
                 else:
-                    print("\nWarning: No model files found after training")
+                    self._report_progress("\nWarning: No model files found after training")
                     return None
                     
         except Exception as e:
-            print(f"\nError during training: {e}")
+            error_msg = f"\nError during training: {e}"
+            self._report_progress(error_msg)
             import traceback
             traceback.print_exc()
             return None

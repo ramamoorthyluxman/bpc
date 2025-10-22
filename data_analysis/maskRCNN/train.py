@@ -59,10 +59,12 @@ class Trainer:
                     eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                     print(f"{i}/{len(iterable)}, {self}, eta: {eta_string}")
     
-    def __init__(self, args):
+    def __init__(self, args, progress_callback=None, stop_flag=None):
         self.args = args
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         print(f"Using device: {self.device}")
+        self.progress_callback = progress_callback
+        self.stop_flag = stop_flag
         
         # Create output directory
         os.makedirs(self.args.output_dir, exist_ok=True)
@@ -124,6 +126,18 @@ class Trainer:
             else:
                 print(f"Warning: Resume checkpoint {self.args.resume} not found. Starting from scratch.")
 
+    def _report_progress(self, message):
+        """Report progress to callback if available"""
+        if self.progress_callback:
+            self.progress_callback(message)
+        print(message)
+    
+    def _check_stop_flag(self):
+        """Check if training should be stopped"""
+        if self.stop_flag and self.stop_flag.is_set():
+            return True
+        return False
+
     def train_one_epoch(self, epoch):
         self.model.train()
         metric_logger = self.MetricLogger()
@@ -137,7 +151,13 @@ class Trainer:
                 self.optimizer, start_factor=warmup_factor, total_iters=warmup_iters
             )
         
+        batch_count = 0
         for images, targets in metric_logger.log_every(self.train_loader, self.args.print_freq, header):
+            # Check stop flag before each batch
+            if self._check_stop_flag():
+                self._report_progress(f"Training stopped by user at epoch {epoch}, batch {batch_count}")
+                return None
+            
             images = [img.to(self.device) for img in images]
             targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
             
@@ -156,6 +176,7 @@ class Trainer:
             
             metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
             metric_logger.update(lr=self.optimizer.param_groups[0]["lr"])
+            batch_count += 1
         
         return metric_logger
 
@@ -165,6 +186,11 @@ class Trainer:
         num_batches = 0
         with torch.no_grad():
             for images, targets in self.val_loader:
+                # Check stop flag during validation
+                if self._check_stop_flag():
+                    self._report_progress(f"Validation stopped by user")
+                    return None
+                
                 try:
                     images = [img.to(self.device) for img in images]
                     targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
@@ -193,21 +219,54 @@ class Trainer:
     
     def train(self):
         print("Starting training")
+        self._report_progress(f"Starting training from epoch {self.start_epoch} to {self.args.epochs}")
+        
         best_val_loss = float('inf')
         for epoch in range(self.start_epoch, self.args.epochs):
+            # Check stop flag at start of each epoch
+            if self._check_stop_flag():
+                self._report_progress(f"Training stopped by user at epoch {epoch}")
+                break
+            
+            self._report_progress(f"Epoch {epoch}/{self.args.epochs} starting...")
+            
             metric_logger = self.train_one_epoch(epoch)
+            
+            # Check if training was stopped
+            if metric_logger is None:
+                break
+            
             self.lr_scheduler.step()
+            
+            self._report_progress(f"Epoch {epoch}/{self.args.epochs} - Running validation...")
             val_loss = self.validate()
             
-            self.writer.add_scalar('Loss/train', metric_logger.meters['loss'].avg, epoch)
+            # Check if validation was stopped
+            if val_loss is None:
+                break
+            
+            train_loss = metric_logger.meters['loss'].avg
+            lr = self.optimizer.param_groups[0]['lr']
+            
+            self._report_progress(
+                f"Epoch {epoch}/{self.args.epochs} completed - "
+                f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, LR: {lr:.6f}"
+            )
+            
+            self.writer.add_scalar('Loss/train', train_loss, epoch)
             self.writer.add_scalar('Loss/val', val_loss, epoch)
-            self.writer.add_scalar('LearningRate', self.optimizer.param_groups[0]['lr'], epoch)
+            self.writer.add_scalar('LearningRate', lr, epoch)
             
             if epoch % self.args.save_freq == 0 or (epoch + 1) == self.args.epochs:
+                self._report_progress(f"Saving checkpoint at epoch {epoch}...")
                 self.save_checkpoint(epoch)
         
         self.writer.close()
-        print("Training completed")
+        
+        if self._check_stop_flag():
+            self._report_progress("Training was stopped by user")
+        else:
+            self._report_progress("Training completed successfully")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Mask R-CNN on mechanical parts dataset")
